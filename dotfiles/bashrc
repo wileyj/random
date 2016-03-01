@@ -1,0 +1,103 @@
+shopt -s checkwinsize
+
+export PS1="\n[\[\e[1;37m\]\u\[\e[0m\]@\[\e[1;34m\]\H\[\e[0m\]] [\[\e[1;33m\]\d, \t\[\e[0m\]] [\[\e[1;31m\]\!\[\e[0m\]]\n\[\e[1;31m\]\[\e[0m\][\[\e[1;37m\]\w\[\e[0m\]]\n\[\e[1;37m\]\\$\[\e[0m\] "
+
+export HISTTIMEFORMAT='%F %T '
+export HISTCONTROL=ignoredups
+export HISTCONTROL=ignoreboth
+export HISTIGNORE='pwd:ls:history:'
+export HISTSIZE=4096
+export EDITOR='/usr/bin/vim'
+export AUTOSSH_POLL=30
+
+if [[ -x "`which dircolors`" ]]; then eval `dircolors`; fi
+
+# functions
+
+dropcaches () { 
+   sudo bash -c 'sync && sync && sync && echo 3 > /proc/sys/vm/drop_caches' ; 
+}
+tsbk () { 
+   file=$1; if [[ "$file" == '' ]]; then return; fi; cp -v "$file" "${file}-$( tstmp )"; 
+}
+
+coretemp (){
+   clear
+
+   while true ;
+   do
+      sensors | grep ^Core | \
+         while read x;
+         do
+            printf '% .23s\n' "$x"
+         done
+
+      sleep 1 && clear
+   done
+}
+
+memhogs (){
+   TR=`free|grep Mem:|awk '{print $2}'`
+
+   ps axo rss,comm,pid | awk -v tr=$TR '{proc_list[$2]+=$1;} END {for (proc in proc_list) {proc_pct=(proc_list[proc]/tr)*100; printf("%d\t%-16s\t%0.2f%\n",proc_list[proc],proc,proc_pct);}}' | sort -n | tail -n 10
+}
+
+beepwhenup (){
+   PHOST="$@";
+
+   if [[ "$PHOST" == '' ]];
+   then
+      echo 'Enter host you want to ping:'
+
+      read PHOST;
+   fi;
+
+   if [[ "$PHOST" == '' ]];
+   then
+      echo 'No host to ping.  Aborted.'
+
+      return 1
+   fi;
+
+   while true ;
+   do
+      ping -c1 -W2 $PHOST 2>&1 >/dev/null;
+
+      if [[ "$?" -eq 0 ]];
+      then
+         for j in $(seq 1 4);
+         do
+            beep
+         done;
+
+         ping -c1 $PHOST
+
+         break
+      fi
+   done
+
+   return 0
+}
+
+howmuchmem (){
+   PROCNAME="$@";
+
+   echo $PROCNAME IS USING \
+   $(
+      echo "scale=4; ($( ps axo rss,comm | grep $PROCNAME | awk '{ TOTAL += $1 } END { print TOTAL }' )/$( free | head -n 2 | tail -n 1 | awk '{ print $2 }' ))*100" | bc
+   )% of system RAM;
+}
+
+nvtemp (){
+   clear;
+
+   while true ;
+   do
+      nvidia-settings -q '[gpu:0]/GPUCoreTemp' | perl -nE '/.*:\s(\d+)\.$/ && say "GPU temp: $1"'
+
+      sleep 1 && clear;
+   done
+}
+
+export PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games:/usr/local/sbin:/usr/sbin:/sbin
+if [[ -e ~/.ssh-aliases ]]; then source ~/.ssh-aliases ; fi
