@@ -1,0 +1,583 @@
+{
+    "AWSTemplateFormatVersion" : "2010-09-09",
+    "Description"              : "Elastic Beanstalk Stack",
+    "Parameters" : {
+        "SolutionStackName" : {
+            "Type"          : "String",
+            "Default"       : "{{solution_stack}}"
+        },
+        "NotifyEmail" : { 
+            "Type"          : "String",
+            "Default"       : "aws@risingtidegames.com"
+        },
+        "NotifyMethod" : { 
+            "Type"          : "String",
+            "Default"       : "email"
+        },
+        "InstanceProfile" : {
+            "Type"          : "String",
+            "Default"       : "RTG-Base"
+        },
+        "HealthType" : {
+            "Type"          : "String",
+            "Default"       : "{{health_type}}"
+        },
+        "EnvironmentShort" : {
+            "Type"          : "String",
+            "Default"       : "{{env_short}}"
+        },
+        "Domain" : {
+            "Type"          : "String",
+            "Default"       : "risingtidegames.com"
+        },
+        "Environment" : {
+            "Type"          : "String",
+            "Default"       : "{{environment}}"
+        },
+        "EnvironmentVersion" : {
+            "Type"          : "String",
+            "Default"       : "{{app_version}}"
+        },
+        "ServiceRole" : {
+            "Type"          : "String",
+            "Default"       : "{{service_role}}"
+        },
+        "WarName" : {
+            "Type"          : "String",
+            "Default"       : "{{warfile}}"
+        },
+        "KeyName" : {
+            "Type"          : "String",
+            "Default"       : "{{keyname}}"
+        },
+        "InstanceType" : {
+            "Type"          : "String",
+            "AllowedValues" : [ "t1.micro","t2.micro","m3.medium","m3.xlarge","m3.2xlarge","t2.micro","t2.medium","m4.large","m4.xlarge","m4.2xlarge","c4.medium", "c4.xlarge"],
+            "Default"       : "{{instance}}"
+        },
+        "AppName" : {
+            "Type"          : "String",
+            "Default"       : "{{app_name}}"
+        },
+        "HttpPort" : {
+            "Type"          : "String",
+            "Default"       : "80"
+        }, 
+        "HttpsPort" : {
+            "Type"          : "String",
+            "Default"       : "443"
+        }, 
+        "MaxSize" : {
+            "Type"          : "String",
+            "Default"       : "{{minsize}}"
+        }, 
+        "MinSize" : {
+            "Type"          : "String",
+            "Default"       : "{{maxsize}}"
+        }, 
+        "VersionLabel" : {
+            "Type"          : "String",
+            "Default"       : "{{version_label}}"
+        },
+        "AppVersion" : {
+            "Type"          : "String",
+            "Default"       : "{{app_version}}"
+        },
+        "ASGCooldown" : {
+            "Type"          : "Number",
+            "Default"       : "300"
+        }, 
+        "ASGMonitoringInterval" : {
+            "Type"          : "String",
+            "Default"       : "1"
+        },
+        "ASGEnvironmentType" : {
+            "Type"          : "String",
+            "Default"       : "LoadBalanced"
+        },
+        "ASGRollingUpdateType" : {
+            "Type"          : "String",
+            "Default"       : "Health"
+        },
+        "ASGRollingUpdateEnabled" : {
+            "Type"          : "String",
+            "Default"       : "true"
+        },
+        "ASGMaxBatchSize" : {
+            "Type"          : "String",
+            "Default"       : "2"
+        },
+        "ASGMinInstancesInService" : {
+            "Type"          : "String",
+            "Default"       : "2"
+        },
+        "ASGMeasureName" : {
+            "Type"          : "String",
+            "Default"       : "NetworkOut"
+        },
+        "ASGLowerThreshold" : {
+            "Type"          : "String",
+            "Default"       : "{{lower}}"
+        },
+        "ASGUpperThreshold" : {
+            "Type"          : "String",
+            "Default"       : "{{upper}}"
+        },
+        "ASGPeriod" : {
+            "Type"          : "String",
+            "Default"       : "1"
+        },
+        "ASGUnit" : {
+            "Type"          : "String",
+            "Default"       : "Bytes"
+        },
+        "ASGStatistic" : {
+            "Type"          : "String",
+            "Default"       : "Average"
+        },
+        "ASGUpperBreachScaleIncrement" : {
+            "Type"          : "String",
+            "Default"       : "1"
+        },
+        "ASGLowerBreachScaleIncrement" : {
+            "Type"          : "String",
+            "Default"       : "-1"
+        },
+        "ASGBreachDuration" : {
+            "Type"          : "String",
+            "Default"       : "1"
+        },
+        "ASGRootVolumeType" : {
+            "Type"          : "String",
+            "Default"       : "gp2"
+        },
+        "LogPublicationControl" : {
+            "Type"    : "String",
+            "Default" : "false"
+        },
+        "TomcatXmx" : {
+            "Type"    : "String",
+            "Default" : "512m"
+        },
+        "TomcatXms" : {
+            "Type"    : "String",
+            "Default" : "512m"
+        },
+        "TomcatMaxPermSize" : {
+            "Type"    : "String",
+            "Default" : "64m"
+        },
+        "ELBCrossZone" : {
+            "Type"    : "String",
+            "Default" : "true"
+        },
+        "ELBHealthcheckURL" : {
+            "Type"    : "String",
+            "Default" : "/health"
+        },
+        "ELBTimeout" : {
+            "Type"    : "String",
+            "Default" : "4"
+        },
+        "ELBCommandTimeout" : {
+            "Type"    : "String",
+            "Default" : "300"
+        },
+        "ELBBatchSizeType" : {
+            "Type"    : "String",
+            "Default" : "Percentage"
+        },
+        "ELBBatchSize" : {
+            "Type"    : "String",
+            "Default" : "55"
+        },
+        "ELBConnectionDrainingEnabled" : {
+            "Type"    : "String",
+            "Default" : "true"
+        },
+        "ELBConnectionDrainingTimeout" : {
+            "Type"    : "String",
+            "Default" : "20"
+        },
+        "ELBHealthyThreshold" : {
+            "Type"    : "String",
+            "Default" : "3"
+        },
+        "ELBUnhealthyThreshold" : {
+            "Type"    : "String",
+            "Default" : "3"
+        },
+        "ELBInterval" : {
+            "Type"    : "String",
+            "Default" : "5"
+        },
+        "ELBScheme" : {
+            "Type"    : "String",
+            "Default" : "external"
+        }
+    },
+    "Mappings": {
+        "AWSRegionArch2AMI": {
+            "us-east-1" : { "pv" : "ami-2393d549", "hvm" : "ami-d69fd9bc" },
+            "us-west-1" : { "pv" : "ami-3fcba25f", "hvm" : "ami-86caa3e6" },
+            "us-west-2" : { "pv" : "ami-05796a64", "hvm" : "ami-bf6675de" }
+        },
+        "AWSInstanceType2Arch" : {
+            "t1.micro"   : { "Arch" : "pv"  },
+            "m3.medium"  : { "Arch" : "pv"  },
+            "m3.xlarge"  : { "Arch" : "pv"  },
+            "m3.2xlarge" : { "Arch" : "pv"  },
+            "t2.micro"   : { "Arch" : "hvm" },
+            "m4.large"   : { "Arch" : "hvm" },
+            "m4.xlarge"  : { "Arch" : "hvm" },
+            "m4.2xlarge" : { "Arch" : "hvm" },
+            "c4.medium"  : { "Arch" : "hvm" },
+            "c4.xlarge"  : { "Arch" : "hvm" }
+        },
+        "EnvSettings":{
+            "dev" : { 
+                "SSLCert"     : "arn:aws:iam::{{account}}:server-certificate/{{ssl_cert}}",
+                "NotifyArn"   : "arn:aws:sns:{{region}}:{{account}}:{{app_arn}}",
+                "NotifyTopic" : "{{app_arn}}",
+                "JVMOptions"  : "-DLog4jContextSelector=org.apache.logging.log4j.core.async.AsyncLoggerContextSelector"
+            },
+            "production" : { 
+                "SSLCert"     : "arn:aws:iam::{{account}}:server-certificate/{{ssl_cert}}",
+                "NotifyArn"   : "arn:aws:sns:{{region}}:{{account}}:{{app_arn}}",
+                "NotifyTopic" : "{{app_arn}}",
+                "JVMOptions"  : "-DLog4jContextSelector=org.apache.logging.log4j.core.async.AsyncLoggerContextSelector -Dnewrelic.environment=prod -javaagent:\/opt\/newrelic\/newrelic.jar"
+            },
+            "staging" : { 
+                "SSLCert"     : "arn:aws:iam::{{account}}:server-certificate/{{ssl_cert}}",
+                "NotifyArn"   : "arn:aws:sns:{{region}}:{{account}}:{{app_arn}}",
+                "NotifyTopic" : "{{app_arn}}",
+                "JVMOptions"  : "-DLog4jContextSelector=org.apache.logging.log4j.core.async.AsyncLoggerContextSelector"
+            }
+        },
+        "VPCNetworkSettings" : {
+            "us-east-1" : { 
+                "SecurityGroups" : "sg-22bc4b44,sg-be55f7d8,sg-8855f7ee",
+                "PublicSubnets"  : "subnet-aa6ffedd,subnet-4a0dd261",
+                "PrivateSubnets" : "subnet-a96ffede,subnet-490dd262",
+                "VPC"            : "vpc-f7453492"
+            },
+            "us-west-1" : { 
+                "SecurityGroups" : "sg-66da9a03,sg-957705f0,sg-9c7103f9",
+                "PublicSubnets"  : "subnet-72243b34,subnet-774f9012",
+                "PrivateSubnets" : "subnet-73243b35,subnet-764f9013",
+                "VPC"            : "vpc-8e26e1eb"
+            },
+            "us-west-2" : { 
+                "SecurityGroups" : "sg-0fef776b,sg-ae0878ca,sg-850878e1",
+                "PublicSubnets"  : "subnet-36dfa953,subnet-1b00a842",
+                "PrivateSubnets" : "subnet-fddfa998,subnet-3800a861",
+                "VPC"            : "vpc-8f66f9ea"
+            }
+        },
+        "RegionToVpc" : {
+            "us-east-1" : {"AvailabilityZone1" : "us-east-1a", "AvailabilityZone2" : "us-east-1d" },
+            "us-west-1" : {"AvailabilityZone1" : "us-west-1b", "AvailabilityZone2" : "us-west-1c" },
+            "us-west-2" : {"AvailabilityZone1" : "us-west-2b", "AvailabilityZone2" : "us-west-2c" }
+        }
+    },
+    "Resources" : {
+        "ApplicationVersion" : {
+            "Type"       : "AWS::ElasticBeanstalk::ApplicationVersion",
+            "Properties" : {
+                "ApplicationName" : {"Fn::Join":["-",[ {"Ref":"AppName"}, {"Ref":"Environment"} ] ] },
+                "Description"     : { "Fn::Join":[ " ", [ { "Ref":"AppName" }, { "Ref":"Environment" }, { "Ref":"AppVersion" } ] ] },
+                "SourceBundle"    : {"S3Bucket":{ "Fn::Join":[ "-", [ "netflix", "deploy", { "Ref":"AWS::Region" } ] ] },"S3Key":{"Ref":"WarName"}}
+            }
+        },
+        "ApplicationEnvironment" : {
+            "Type"       : "AWS::ElasticBeanstalk::Environment",
+            "Properties" : {
+                "ApplicationName" : { "Fn::Join" : ["-", [ {"Ref": "AppName"}, {"Ref":"Environment"} ] ] },
+                "Description"     : { "Fn::Join" : ["-", [ {"Ref": "AppName"}, {"Ref": "EnvironmentShort"}, {"Ref": "EnvironmentVersion"} ] ] },
+                "TemplateName"    : { "Ref" : "ApplicationTemplate" },
+                "VersionLabel"    : {"Ref" : "ApplicationVersion" },
+                "EnvironmentName" : { "Fn::Join" : ["-", [ {"Ref": "AppName"}, {"Ref": "EnvironmentShort"}, {"Ref": "EnvironmentVersion"} ] ] },
+                "Tags" : [{
+                    "Key"   : "Region",
+                    "Value" : { "Ref": "AWS::Region" }
+                }, {
+                    "Key"   : "Environment",
+                    "Value" : { "Ref": "Environment" }
+                }, {
+                    "Key"   : "Region",
+                    "Value" : {"Ref":"AWS::Region"}
+                }]
+            }
+        },
+        "ApplicationTemplate" : {
+            "Type"       : "AWS::ElasticBeanstalk::ConfigurationTemplate",
+            "Properties" : {
+                "ApplicationName"   : { "Fn::Join" : ["-", [ {"Ref": "AppName"}, {"Ref":"Environment"} ] ] },
+                "Description"       : { "Fn::Join" : [" ", [ {"Ref": "AppName"}, {"Ref": "Environment"}, { "Ref": "AWS::Region" }, { "Ref" : "VersionLabel" } ] ] },
+                "SolutionStackName" : { "Ref":"SolutionStackName" },
+                "OptionSettings"    : [{
+                    "Namespace"  : "aws:elasticbeanstalk:sns:topics",
+                    "OptionName" : "Notification Endpoint",
+                    "Value"      : {"Ref":"NotifyEmail"}
+                },{
+                    "Namespace"  : "aws:elasticbeanstalk:sns:topics",
+                    "OptionName" : "Notification Protocol",
+                    "Value"      : {"Ref":"NotifyMethod"}
+                },{
+                    "Namespace"  : "aws:elasticbeanstalk:sns:topics",
+                    "OptionName" : "Notification Topic ARN",
+                    "Value"      : { "Fn::FindInMap": [ "EnvSettings", { "Ref": "Environment" }, "NotifyArn"] }
+                },{
+                    "Namespace"  : "aws:elasticbeanstalk:sns:topics",
+                    "OptionName" : "Notification Topic Name",
+                    "Value"      : { "Fn::FindInMap": [ "EnvSettings", { "Ref": "Environment" }, "NotifyTopic"] }
+                },{
+                    "Namespace"  : "aws:elasticbeanstalk:hostmanager",
+                    "OptionName" : "LogPublicationControl",
+                    "Value"      : { "Ref": "LogPublicationControl" }
+                }, {
+                    "Namespace"  : "aws:elasticbeanstalk:environment",
+                    "OptionName" : "EnvironmentType",
+                    "Value"      : "LoadBalanced"
+                }, {
+                    "Namespace"  : "aws:elasticbeanstalk:command",
+                    "OptionName" : "Timeout",
+                    "Value"      : { "Ref": "ELBCommandTimeout" }
+                },{
+                    "Namespace"  : "aws:elasticbeanstalk:command",
+                    "OptionName" : "BatchSizeType",
+                    "Value"      : { "Ref": "ELBBatchSizeType" }
+                },{
+                    "Namespace"  : "aws:elasticbeanstalk:command",
+                    "OptionName" : "BatchSize",
+                    "Value"      : { "Ref": "ELBBatchSize" }
+                },{
+                    "Namespace"  : "aws:elasticbeanstalk:application",
+                    "OptionName" : "Application Healthcheck URL",
+                    "Value"      : { "Ref": "ELBHealthcheckURL" }
+                },{
+                    "Namespace"  : "aws:elasticbeanstalk:application:environment",
+                    "OptionName" : "REGION",
+                    "Value"      : { "Ref": "AWS::Region" }
+                },{
+                    "Namespace"  : "aws:elasticbeanstalk:healthreporting:system",
+                    "OptionName" : "SystemType",
+                    "Value"      : { "Ref": "HealthType" }
+                }, {
+                    "Namespace"  : "aws:elasticbeanstalk:environment",
+                    "OptionName" : "ServiceRole",
+                    "Value"      : {"Ref": "ServiceRole"}
+                },{
+                    "Namespace"  : "aws:ec2:vpc",
+                    "OptionName" : "VPCId",
+                    "Value"      : { "Fn::FindInMap": [ "VPCNetworkSettings", { "Ref": "AWS::Region" }, "VPC"]}
+                }, {
+                    "Namespace"  : "aws:ec2:vpc",
+                    "OptionName" : "Subnets",
+                    "Value"      : { "Fn::FindInMap": [ "VPCNetworkSettings", { "Ref": "AWS::Region" }, "PrivateSubnets"]}
+                }, {
+                    "Namespace"  : "aws:ec2:vpc",
+                    "OptionName" : "ELBSubnets",
+                    "Value"      : { "Fn::FindInMap": [ "VPCNetworkSettings", { "Ref": "AWS::Region" }, "PublicSubnets"]}
+                },{
+                    "Namespace"  : "aws:ec2:vpc",
+                    "OptionName" : "ELBScheme",
+                    "Value"      : { "Ref": "ELBScheme" }
+                }, {
+                    "Namespace"  : "aws:autoscaling:updatepolicy:rollingupdate",
+                    "OptionName" : "RollingUpdateType",
+                    "Value"      : { "Ref": "ASGRollingUpdateType" }
+                }, {
+                    "Namespace"  : "aws:autoscaling:updatepolicy:rollingupdate",
+                    "OptionName" : "RollingUpdateEnabled",
+                    "Value"      : { "Ref": "ASGRollingUpdateEnabled" }
+                }, {
+                    "Namespace"  : "aws:autoscaling:updatepolicy:rollingupdate",
+                    "OptionName" : "MaxBatchSize",
+                    "Value"      : { "Ref": "ASGMaxBatchSize" }
+                }, {
+                    "Namespace"  : "aws:autoscaling:updatepolicy:rollingupdate",
+                    "OptionName" : "MinInstancesInService",
+                    "Value"      : { "Ref": "ASGMinInstancesInService" }
+                }, {
+                    "Namespace"  : "aws:autoscaling:trigger",
+                    "OptionName" : "MeasureName",
+                    "Value"      : { "Ref": "ASGMeasureName" }
+                }, {
+                    "Namespace"  : "aws:autoscaling:trigger",
+                    "OptionName" : "LowerThreshold",
+                    "Value"      : { "Ref": "ASGLowerThreshold" }
+                }, {
+                    "Namespace"  : "aws:autoscaling:trigger",
+                    "OptionName" : "UpperThreshold",
+                    "Value"      : { "Ref": "ASGUpperThreshold" }
+                }, {
+                    "Namespace"  : "aws:autoscaling:trigger",
+                    "OptionName" : "Period",
+                    "Value"      : { "Ref": "ASGPeriod" }
+                }, {
+                    "Namespace"  : "aws:autoscaling:trigger",
+                    "OptionName" : "Unit",
+                    "Value"      : { "Ref": "ASGUnit" }
+                }, {
+                    "Namespace"  : "aws:autoscaling:trigger",
+                    "OptionName" : "Statistic",
+                    "Value"      : { "Ref": "ASGStatistic" }
+                }, {
+                    "Namespace"  : "aws:autoscaling:trigger",
+                    "OptionName" : "UpperBreachScaleIncrement",
+                    "Value"      : { "Ref": "ASGUpperBreachScaleIncrement" }
+                }, {
+                    "Namespace"  : "aws:autoscaling:trigger",
+                    "OptionName" : "LowerBreachScaleIncrement",
+                    "Value"      : { "Ref": "ASGLowerBreachScaleIncrement" }
+                }, {
+                    "Namespace"  : "aws:autoscaling:trigger",
+                    "OptionName" : "BreachDuration",
+                    "Value"      : { "Ref": "ASGBreachDuration" }
+                }, {
+                    "Namespace"  : "aws:autoscaling:updatepolicy:rollingupdate",
+                    "OptionName" : "MinInstancesInService",
+                    "Value"      : { "Ref": "ASGMinInstancesInService" }
+                }, {
+                    "Namespace"  : "aws:autoscaling:launchconfiguration",
+                    "OptionName" : "InstanceType",
+                    "Value"      : { "Ref": "InstanceType" }
+                }, {
+                    "Namespace"  : "aws:autoscaling:launchconfiguration",
+                    "OptionName" : "RootVolumeType",
+                    "Value"      : { "Ref":"ASGRootVolumeType" }
+                }, {
+                    "Namespace"  : "aws:autoscaling:launchconfiguration",
+                    "OptionName" : "EC2KeyName",
+                    "Value"      : { "Ref": "KeyName" }
+                }, {
+                    "Namespace"  : "aws:autoscaling:launchconfiguration",
+                    "OptionName" : "SecurityGroups",
+                    "Value"      : { "Fn::FindInMap": [ "VPCNetworkSettings", { "Ref": "AWS::Region" }, "SecurityGroups"]}
+                }, {
+                    "Namespace"  : "aws:autoscaling:asg",
+                    "OptionName" : "MinSize",
+                    "Value"      : {"Ref": "MinSize"}
+                }, {
+                    "Namespace"  : "aws:autoscaling:asg",
+                    "OptionName" : "MaxSize",
+                    "Value"      : {"Ref": "MaxSize"}
+                },{
+                    "Namespace"  : "aws:autoscaling:asg",
+                    "OptionName" : "Cooldown",
+                    "Value"      : { "Ref": "ASGCooldown" }
+                },{
+                    "Namespace"  : "aws:autoscaling:asg",
+                    "OptionName" : "Availability Zones",
+                    "Value"      : "Any 2"
+                }, {
+                    "Namespace"  : "aws:elb:loadbalancer",
+                    "OptionName" : "CrossZone",
+                    "Value"      : { "Ref": "ELBCrossZone" }
+                }, {
+                    "Namespace"  : "aws:elb:loadbalancer",
+                    "OptionName" : "LoadBalancerHTTPPort",
+                    "Value"      : { "Ref" : "HttpPort"}
+                }, {
+                    "Namespace"  : "aws:elb:loadbalancer",
+                    "OptionName" : "LoadBalancerHTTPSPort",
+                    "Value"      : { "Ref" : "HttpsPort"}
+                }, {
+                    "Namespace"  : "aws:elb:loadbalancer",
+                    "OptionName" : "SSLCertificateId",
+                    "Value"      : { "Fn::FindInMap": [ "EnvSettings", { "Ref": "Environment" }, "SSLCert"]}
+                },{
+                    "Namespace"  : "aws:elb:healthcheck",
+                    "OptionName" : "HealthyThreshold",
+                    "Value"      : { "Ref": "ELBHealthyThreshold" }
+                },{
+                    "Namespace"  : "aws:elb:healthcheck",
+                    "OptionName" : "UnhealthyThreshold",
+                    "Value"      : { "Ref": "ELBUnhealthyThreshold" }
+                },{
+                    "Namespace"  : "aws:elb:healthcheck",
+                    "OptionName" : "Interval",
+                    "Value"      : { "Ref": "ELBInterval" }
+                },{
+                    "Namespace"  : "aws:elb:healthcheck",
+                    "OptionName" : "Timeout",
+                    "Value"      : { "Ref": "ELBTimeout" }
+                },{
+                    "Namespace"  : "aws:elasticbeanstalk:container:tomcat:jvmoptions",
+                    "OptionName" : "Xmx",
+                    "Value"      : { "Ref": "TomcatXmx" }
+                },{
+                    "Namespace"  : "aws:elasticbeanstalk:container:tomcat:jvmoptions",
+                    "OptionName" : "Xms",
+                    "Value"      : { "Ref": "TomcatXms" }
+                },{
+                    "Namespace"  : "aws:elasticbeanstalk:container:tomcat:jvmoptions",
+                    "OptionName" : "XX:MaxPermSize",
+                    "Value"      : { "Ref": "TomcatMaxPermSize" }
+                },{
+                    "Namespace"  : "aws:elasticbeanstalk:container:tomcat:jvmoptions",
+                    "OptionName" : "JVM Options",
+                    "Value"      : { "Fn::FindInMap": [ "EnvSettings", { "Ref": "Environment" }, "JVMOptions"]}
+                },{
+                    "Namespace"  : "aws:elb:policies",
+                    "OptionName" : "ConnectionDrainingEnabled",
+                    "Value"      : { "Ref": "ELBConnectionDrainingEnabled" }
+                },{
+                    "Namespace"  : "aws:elb:policies",
+                    "OptionName" : "ConnectionDrainingTimeout",
+                    "Value"      : { "Ref": "ELBConnectionDrainingTimeout" }
+                },{
+                    "Namespace"  : "aws:autoscaling:launchconfiguration",
+                    "OptionName" : "ImageId",
+                    "Value"      : { "Fn::FindInMap": [ "AWSRegionArch2AMI", { "Ref": "AWS::Region" }, { "Fn::FindInMap": [ "AWSInstanceType2Arch", { "Ref": "InstanceType" }, "Arch" ] } ] }
+                }, {
+                    "Namespace"  : "aws:autoscaling:launchconfiguration",
+                    "OptionName" : "IamInstanceProfile",
+                    "Value"      : { "Ref": "InstanceProfile" }
+                }]   
+            }
+        },
+        "DNSRecordGlobal" : {
+            "Type" : "AWS::Route53::RecordSet",
+            "Properties" : {
+                "HostedZoneName"  : { "Fn::Join" : [ "", [{"Ref" : "Domain"}, "." ]]},
+                "Comment"         : "CNAME redirect to aws.amazon.com.",
+                "Name"            : { "Fn::Join" : [ ".",  [ { "Fn::Join" : [ "-", [{"Ref" : "AppName"}, {"Ref" : "EnvironmentShort"},{"Ref": "EnvironmentVersion"},{"Ref" : "AWS::Region"} ] ] }, {"Ref" : "Domain"} ] ] },
+                "Type"            : "CNAME",
+                "TTL"             : "900",
+                "ResourceRecords" : [{ "Fn::GetAtt" : [ "ApplicationEnvironment", "EndpointURL" ] } ]
+            }
+        }
+    },
+    "Outputs" : {
+        "Stack" : {
+            "Description" : "Stack",
+            "Value"       : { "Ref": "AWS::StackId" }
+        },
+        "LBEndpoint" : {
+            "Description" : "DNS Record",
+            "Value"       : { "Fn::Join": ["", [ "http://", { "Fn::GetAtt": [ "ApplicationEnvironment", "EndpointURL"] } ] ] }
+        },
+        "DNSRecordGlobal" : {
+            "Description" : "Global DNS Name",
+            "Value"       : {"Ref": "DNSRecordGlobal"}
+        },
+        "Environment" : {
+            "Description" : "Environment",
+            "Value"       : { "Ref" : "Environment" }
+        },
+        "SNSAddress" : {
+            "Description" : "SNSAddress",
+            "Value"       : {"Ref":"NotifyEmail"}
+        },
+        "VPCId" : {
+            "Description" : "VPCId",
+            "Value"       : { "Fn::FindInMap": [ "VPCNetworkSettings", { "Ref": "AWS::Region" }, "VPC" ] }
+        },
+        "AppName" : {
+            "Description" : "AppName",
+            "Value"       : { "Fn::Join" : ["-", [ {"Ref": "AppName"}, {"Ref": "EnvironmentShort"}, {"Ref": "EnvironmentVersion"} ] ] }
+        }
+    }
+}
