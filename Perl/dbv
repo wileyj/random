@@ -1,0 +1,1327 @@
+#!/usr/bin/perl
+
+use strict;
+use POSIX;
+use Getopt::Long;
+use File::stat;
+
+# all executions are logged as:
+# /tmp/dbv.<timestamp>
+#  and will contain all of the commands executed and all of the values defined or generated (sizes of LV, stipe size etc)
+#  if there is an exception, the command that produced it should be the last item in the logfile.
+#  all logfiles older than 1 day are removed on the next execution
+
+my $lv_size      = "100G"; # set default instance size to 100G
+my $binlogs_size = "10G";  # set default mysql binlogs size to 10G
+my $tmp_size     = "2G";   # set default mysql tmp dir size to 2G
+my $debug;
+my $help;
+my $lv_name;
+my $lv_name_full;
+my $vg_name;
+my $get_vgs;
+my $option;
+my $lv_instance_name;
+my $lv_binlogs_name;
+my $lv_tmp_name;
+my $lv_instance_path;
+my $lv_binlogs_path;
+my $lv_tmp_path;
+my $istance_dir;
+my $binlogs_dir;
+my $tmp_dir;
+my $lv_type;
+my $vdisks;
+my $osvg_pdisk;
+my $osvg_usable;
+my $osvg_stripe;
+my $osvg_sunit;
+my $osvg_swidth;
+my $dbvg_pdisk;
+my $dbvg_usable;
+my $dbvg_stripe;
+my $dbvg_sunit;
+my $dbvg_swidth;
+my $stripe_size;
+my $dir;
+my $type;
+my $options;
+my $application;
+my $allocsize;
+my $free;
+my $timestamp=localtime;
+$timestamp=~s/\ /_/g;
+$timestamp=~s/:/-/g;
+my $recursive;
+my $osvg;
+my $dbvg;
+my $instance_fs;
+my $binlogs_fs;
+my $tmp_fs;
+my $volume_name;
+my $osrelease;
+my %paths;
+
+GetOptions (
+    'debug'         => \$debug,
+    'help'          => \$help,
+    'instance=s'    => \$lv_name,
+    'size=s'        => \$lv_size,
+    'app=s'         => \$application,
+    'option=s'      => \$option,
+    'type=s'        => \$lv_type,
+    'free'          => \$free
+);
+if ($help){
+    &show_Help();
+}
+# retrieve the OS version.
+open (FILE, "/etc/redhat-release");
+my $release_line = <FILE>;
+close FILE;
+my @release_split = split(" ", $release_line);
+$osrelease = $release_split[2];
+logger("OS Release: $osrelease\n", 0);
+
+# conditionals to set the paths of binaries called. apparently centos6 places binaries in different locations than centos5.
+
+if  ( $osrelease > 5.9 ){
+#this is for centos 6 paths
+    %paths = (
+        "vgs"        => "/sbin/vgs",
+        "vgdisplay"  => "/sbin/vgdisplay",
+        "find"       => "/bin/find",
+        "yum"        => "/usr/bin/yum",
+        "lvdisplay"  => "/sbin/lvdisplay",
+        "lvcreate"   => "/sbin/lvcreate",
+        "lvextend"   => "/sbin/lvextend",
+        "lvremove"   => "/sbin/lvremove",
+        "mount"      => "/bin/mount",
+        "umount"     => "/bin/umount",
+        "df"         => "/bin/df",
+        "rm"         => "/bin/rm",
+        "mv"         => "/bin/mv",
+        "mkdir"      => "/bin/mkdir",
+        "perl"       => "/usr/bin/perl",
+        "xfs_growfs" => "/usr/sbin/xfs_growfs",
+        "mv"         => "/bin/mv",
+        "chown"      => "/bin/chown",
+        "ln"         => "/bin/ln",
+        "rpm"        => "/bin/rpm",
+        "grep"       => "/bin/grep",
+    );
+}else{
+# this is for centos 5 paths
+    %paths = (
+        "vgs"        => "/usr/sbin/vgs",
+        "vgdisplay"  => "/usr/sbin/vgdisplay",
+        "find"       => "/usr/bin/find",
+        "yum"        => "/usr/bin/yum",
+        "lvdisplay"  => "/usr/sbin/lvdisplay",
+        "lvcreate"   => "/usr/sbin/lvcreate",
+        "lvextend"   => "/usr/sbin/lvextend",
+        "lvremove"   => "/usr/sbin/lvremove",
+        "mount"      => "/bin/mount",
+        "umount"     => "/bin/umount",
+        "df"         => "/bin/df",
+        "rm"         => "/bin/rm",
+        "mv"         => "/bin/mv",
+        "mkdir"      => "/bin/mkdir",
+        "perl"       => "/usr/bin/perl",
+        "xfs_growfs" => "/usr/sbin/xfs_growfs",
+        "mv"         => "/bin/mv",
+        "chown"      => "/bin/chown",
+        "ln"         => "/bin/ln",
+        "rpm"        => "/bin/rpm",
+        "grep"       => "/bin/grep",
+    );
+}
+
+# simple test to dsiplay how much space is available on the VG's
+if ($free){
+    logger("Diskspace Available:\n",0);
+    system("$paths{'vgs'}");
+    exit 0;
+}
+
+#remove old logfiles, and instantiate a new logfile for this execution.
+my $logfile = "/tmp/dbv.$timestamp";
+open (LOG, ">>$logfile");
+logger("Saving Execution in logfile: /tmp/dbv.$timestamp\n\n",0);
+logger("Removing log files older than today...\n",0);
+logger("Running: /usr/bin/find /tmp -daystart -atime 1 -name \"dbv.*\" -type f -exec rm -f {}\\;\n",1);
+system("$paths{'find'} /tmp -daystart -atime 1 -name \"dbv.*\" -type f -exec rm -f {} \\;");
+my $returned_find=$?;
+logger("Log Removal returned: $returned_find\n", 1);
+
+# set the application type based on in 'application' cmd line arg has been specified.
+if (!$application){
+    $application = "mysql";
+}
+if ($application eq "mongo" || $application eq "mongodb"){
+    $application = "mongo";
+}
+logger("  Cmd line Options:\n",1);
+logger("\tdebug:        $debug\n",1);
+logger("\thelp:         $help\n",1);
+logger("\tapplication:  $application\n",1);
+logger("\tlv_name:      $lv_name\n",1);
+logger("\tlv_size:      $lv_size\n",1);
+logger("\toption:       $option\n",1);
+logger("\ttype:         $type\n",1);
+if ($lv_size <= 0){
+    logger("Exiting - size must be greater than 0\n",0);
+    exit 2;
+}
+if (-f "/etc/profile.d/srvadmin-path.sh"){
+    system("source /etc/profile.d/srvadmin-path.sh"); #ensure we've source the correct path for OpenManage
+}
+logger("Getting ID's of each vdisk in Array\n",1);
+#retrieve the # of vdisks on the raid controller
+my $vdisks=`/opt/dell/srvadmin/sbin/omreport storage vdisk controller=0 | grep "^ID"  | cut -d ":" -f 2`;
+logger("Running: /opt/dell/srvadmin/sbin/omreport storage vdisk controller=0 | grep \"^ID\"  | cut -d \":\" -f 2`", 1);
+logger("vdisks: \n$vdisks\n",1);
+if ($vdisks eq ""){
+    logger("vdisk returned null. omreport likely not installed\n", 0);
+    exit 2;
+}
+# the following will retrieve the disk stats for each vd. we need this when we mkfs the instance filesystem.
+# this requires that the server is a DELL, and that openmanage is installed and working for the storage controller.
+my @split=split("\\n",$vdisks);
+foreach my $item(@split){
+    $item=~s/\ //g;
+    if ($item == 0){ # this is the first vdisk. if no more items exist...then we assume that the dbvg is also sysvg.
+        logger("Getting number of disks in vdisk $item\n",1);
+        # get the number of disks in the VD
+        $osvg_pdisk=`/opt/dell/srvadmin/sbin/omreport storage pdisk vdisk=$item controller=0 | grep "^Serial" | wc -l `;
+        logger("  Number of disks in vdisk $item: $osvg_pdisk\n",1);
+        # get the VD stripe size (shouldl be default for single vd)
+        $osvg_stripe=`/opt/dell/srvadmin/sbin/omreport storage vdisk controller=0 vdisk=$item | grep "Stripe Element Size" | cut -f2 -d ":"`;
+        chomp $osvg_stripe;
+        # pull out only the number chars, and concat a "k" to the end since that's what mkfs is expecting.
+        $osvg_stripe =~ s/[^0-9]//g;
+        $stripe_size = "$osvg_stripe"."k";
+        logger("\tFound Stripe size of $stripe_size in vdisk $item\n", 1);
+        logger("\tregex of stripe_size: $osvg_stripe\n", 1);
+        # do the math to get the values we need to mkfs.
+        $osvg_usable=$osvg_pdisk/2;
+        $osvg_sunit=($osvg_stripe*1024) / 512;
+        $osvg_swidth=$osvg_sunit * $osvg_usable;
+        $dbvg_usable = $osvg_usable;
+        $dbvg_sunit = $osvg_sunit;
+        $dbvg_swidth = $osvg_swidth;
+        $dbvg_stripe = $osvg_stripe;
+        logger("\tosvg_usable :         $osvg_usable\n",1);
+        logger("\tosvg_stripe :         $osvg_stripe\n",1);
+        logger("\tosvg_sunit  :         $osvg_sunit\n",1);
+        logger("\tosvg_swidth :         $osvg_swidth\n",1);
+        logger("\tSingle Vdisk found:   $item\n",1);
+        $osvg = "sysvg";
+        $dbvg = "sysvg";
+        logger("\tosvg: $osvg\n",1);
+        logger("\tdbvg: $osvg\n", 1);
+    }else{
+
+        # this would be the second vdisk
+        logger("Getting number of disks in vdisk $item\n",1);
+
+        # get the number of disks in the VD
+        $dbvg_pdisk=`/opt/dell/srvadmin/sbin/omreport storage pdisk vdisk=$item controller=0 | grep "^Serial" | wc -l `;
+        logger("  Number of disks in vdisk $item: $dbvg_pdisk\n",1);
+
+        # get the VD stripe size (shouldl be default for single vd)
+        $dbvg_stripe=`/opt/dell/srvadmin/sbin/omreport storage vdisk controller=0 vdisk=$item | grep "Stripe Element Size" | cut -f2 -d ":"`;
+        chomp $dbvg_stripe;
+
+        # pull out only the number chars, and concat a "k" to the end since that's what mkfs is expecting.
+        $dbvg_stripe =~ s/[^0-9]//g;
+        $stripe_size = "$dbvg_stripe"."k";
+        logger("\tFound Stripe size of $dbvg_stripe in vdisk $item\n", 1);
+        logger("\tregex of stripe_size: $dbvg_stripe\n", 1);
+
+        # do the math to get the values we need to mkfs.
+        $dbvg_usable=$dbvg_pdisk/2;
+        $dbvg_sunit=($dbvg_stripe*1024) / 512;
+        $dbvg_swidth=$dbvg_sunit * $dbvg_usable;
+        logger("\tdbvg_usable :       $dbvg_usable\n",1);
+        logger("\tdbvg_stripe :       $dbvg_stripe\n",1);
+        logger("\tdbvg_sunit  :       $dbvg_sunit\n",1);
+        logger("\tdbvg_swidth :       $dbvg_swidth\n",1);
+        logger("\tMultiple Vdisks found: $item\n",1);
+        $osvg = "sysvg";
+        $dbvg = `$paths{'vgs'} --noheadings | /bin/grep -v "sysvg\\b" | /bin/grep -v "logvg\\b" | awk {'print \$1'}`;
+        chomp $dbvg;
+
+        #if the system command above fails...the VG structure is not what we're expecting.
+        if ($dbvg eq ""){
+            logger("Error->cannot find the DB Volume Group\n", 0);
+            logger("command: $paths{'vgs'} --noheadings | /bin/grep -v \"sysvg\\b\" | /bin/grep -v \"logvg\\b\" | awk {'print \$1'}\n", 1);
+            logger("Returned: $dbvg", 0);
+            exit 1;
+        }
+        logger("\tosvg: $osvg\n",1);
+        logger("\tdbvg: $dbvg\n", 1);
+    }
+}
+
+# test if xfs rpms are installed, installing them if they're missing.
+my $xfs_installed=`$paths{'rpm'} -qa | grep xfs | wc -l`;
+if ($xfs_installed < 3){
+    logger("XFS rpm's not installed\n",0);
+    logger("Running yum install -y xfsprogs xfsdump xfsprogs-devel\n",0);
+    system("$paths{'yum'} install -y xfsprogs xfsdump xfsprogs-devel");
+    my $returned_yum=$?;
+    if ($returned_yum != 0){
+        logger("Error installing xfs rpm's\n",0);
+        logger("Exiting\n",0);
+        exit 1;
+    }
+}
+if ($application eq "mongo"){
+
+    # if application type is mongo, check to make sure that mongodb is in fact installed
+    my $mongodb_installed=`$paths{'rpm'} -qa | grep mongodb | wc -l`;
+    if ($mongodb_installed == 0){
+        logger("Mongodb rpm's not installed\n",0);
+        logger("Running yum install -y mongodb\n",0);
+        system("$paths{'yum'} install -y mongodb");
+        my $returned_yum=$?;
+        if ($returned_yum != 0){
+            logger("Error installed mongodb rpm's\n",0);
+            logger("Exiting\n",0);
+            exit 1;
+        }
+    }
+}
+
+# some static vars
+my %fs_type = (
+    "ext3"      => "/sbin/mkfs.ext3",
+    "xfs"       => "/sbin/mkfs.xfs",
+    "ext4"      => "/sbin/mkfs.ext4",
+);
+$instance_fs    = "xfs";
+$binlogs_fs     = "xfs";
+$tmp_fs         = "xfs";
+my %vg = (
+    "instance"      => $dbvg,
+    "logs"          => $osvg,
+    "tmp"           => $dbvg
+);
+system("$paths{'vgs'} $osvg &>/dev/null");
+my $returned_vgs_osvg=$?;
+if ($returned_vgs_osvg != 0){
+    logger("Error, no VG $osvg found\n", 0);
+    logger("Exiting\n",0);
+    exit 1;
+}
+system("$paths{'vgs'} $dbvg &>/dev/null");
+my $returned_vgs_dbvg=$?;
+if ($returned_vgs_dbvg != 0){
+    logger("Error, no VG $dbvg found\n", 0);
+    logger("Exiting\n",0);
+    exit 1;
+}
+sub show_Help(){
+    logger("Usage: dbv <options>\n",0);
+    logger("    -i => DB instance name to use (live-mysql-02)\n",0);
+    logger("    -s => size to add space to LV in GB # Defaults to 100G (binlogs will be 10% of this value)\n",0);
+    logger("    -o => option (create/delete/resize)\n",0);
+    logger("    -a => option (mysql/mongodb) # Defaults to mysql\n",0);
+    logger("    -f => Show Available space\n",0);
+    logger("    -t => Type of volume (required for resizing:) instance|logs|tmp\n",0);
+    logger("    -d => debug option\n",0);
+    logger(" \n",0);
+    logger(" Mysql Options:\n",0);
+    logger("  ex: dbv -o create -i live-mysql-02 -a mysql -s 100G\n",0);
+    logger("  ex: dbv -o resize -i live-mysql-02 -a mysql -s 50G -t instance\# to add 50G to live-mysql-02\n",0);
+    logger("  ex: dbv -o resize -i live-mysql-02 -a mysql -s 50G -t logs\# to add 50G to live-mysql-02 binlogs\n",0);
+    logger("  ex: dbv -o resize -i live-mysql-02 -a mysql -s 10G -t tmp\# to add 10G to live-mysql-02 tmp dir\n",0);
+    logger("  \n",0);
+    logger(" Mongodb Options:\n",0);
+    logger("  ex: dbv -o create -i live01-arcent-mdb01 -a mongodb -s 100G\n",0);
+    logger("  ex: dbv -o resize -i live01-arcent-mdb01 -a mongodb -s 50G -t instance\# to add 50G to live01-arcent-mdb01\n",0);
+    logger("  ex: dbv -o delete -i live01-arcent-mdb01 -a mongodb # delete all LV's for live01-arcent-mdb01\n",0);
+    logger("  \n",0);
+    logger(" Global Delete:\n",0);
+    logger("  ex: dbv -o delete -i live-mysql-02 -a mysql # delete all LV's for live-mysql-02\n",0);
+    logger("  \n",0);
+    exit 0;
+}
+# valid options: create, delete, resize
+if (!$option){
+    logger("No option: create | delete |resize\n",0);
+    logger("Exiting\n",0);
+    &show_Help();
+    exit 1;
+}
+if ($option eq "create"){
+    &create_lv($application);
+}elsif($option eq "delete"){
+    &delete_lv($application);
+}elsif($option eq "resize"){
+    &resize_lv($application);
+}else{
+    logger("Unrecognized option $option\n",0);
+    logger("Exiting\n",0);
+    exit 1;
+}
+
+# process was successful, so we exit.
+logger("\nOperation \"$option\" completed successfully\n",0);
+logger("Logfile: $logfile\n", 0);
+close LOG;
+exit 0;
+
+sub delete_lv(){
+
+    # function that runs the error checking before removing the lv in do_lvremove
+    my $db_type = $_[0];
+    logger("Subroutine delete_lv $db_type\n",0);
+    if (!$lv_name){
+        logger("Error: no LV specified\n",0);
+        logger("Exiting\n",0);
+        exit 1;
+    }else{
+        do_lvremove($lv_name,$db_type);
+    }
+}
+sub resize_lv(){
+
+    # function that runs the error checking before resizing the lv in do_lvresize
+    my $db_type = $_[0];
+    print "Subroutine resize_lv $db_type\n";
+    if ($lv_type eq "instance" || $lv_type eq "log" || $lv_type eq "logs" || $lv_type eq "tmp"){
+
+        # this is successful
+        logger("LV type check passed:$lv_type\n", 1);
+        if ($lv_type eq "log" || $lv_type eq "logs"){
+            $lv_type = "logs";
+        }
+    }else{
+
+        #everything from here on is some type of error and will exit
+        if ($application eq "mysql"){
+            logger("LV type must be 1 of: instance | log | tmp\n",0);
+            logger("Type: $lv_type\n",0);
+            logger("Exiting\n",0);
+            exit 1;
+        }else{
+
+            # This is for mongodb instances. no log/tmp LV's setup there yet.
+            $lv_type="instance";
+        }
+    }
+    if (!$lv_name){
+        logger("Error, no LV specified\n",0);
+        logger("Exiting\n",0);
+        exit 1;
+    }elsif(!$lv_size){
+        logger("Error, no size specified\n",0);
+        logger("Exiting\n",0);
+        exit 2;
+    }else{
+        $lv_size=~s/G//g;
+        $binlogs_size=ceil($lv_size/10);
+        if ($lv_size=~/[0-9]/){
+            $lv_size="$lv_size"."G";
+        }else{
+            logger("Error. lv_size must be a number in GB\n",0);
+            logger("lv_size: $lv_size\n",0);
+            logger("Exiting\n",0);
+            exit 2;
+        }
+        logger("Entering Subroutine to resize\n",0);
+        do_lvresize($lv_name, $lv_size, $lv_type, $db_type);
+    }
+}
+sub create_lv(){
+
+    # function that does error checking before creating the LV
+    my $db_type         = $_[0];
+    my $mysql_instance  = "";
+    my $mysql_binlogs   = "";
+    my $mysql_tmplv     = "";
+    logger("Subroutine create_lv $db_type\n",0);
+    if (!$lv_name){
+        logger("Missing LV name\n",0);
+        logger("lv_name: $lv_name\n",0);
+        logger("Exiting\n",0);
+        exit 1;
+    }
+    if (!$lv_size){
+        logger("No LV size specified. Defaulting to 100G\n",0);
+    }
+    $allocsize = $stripe_size;
+    if ($db_type eq "mysql"){
+        $mysql_instance = "-instance";
+        $mysql_binlogs  = "-logs";
+        $mysql_tmplv    = "-tmp";
+    }
+
+    # set the full device path based on $dbvg which is defined above, appending "-instance" so we know what the LV is for
+    $lv_instance_path="/dev/"."$dbvg"."/"."$lv_name"."-instance";
+    logger("\tlv_instance_path: $lv_instance_path\n",0);
+    if ($db_type eq "mysql"){
+
+        # mysql needs to create a few extra LV's, so here we define them.
+        $lv_binlogs_path="/dev/"."$osvg"."/"."$lv_name"."-logs";
+        logger("\tlv_binlogs_path: $lv_binlogs_path\n",0);
+        $lv_tmp_path="/dev/"."$dbvg"."/"."$lv_name"."-tmp";
+        logger("\tlv_tmp_path: $lv_tmp_path\n",0);
+    }
+    $lv_instance_name="$lv_name"."-instance";
+    logger("\tlv_instance_name: $lv_instance_name\n",0);
+    $lv_binlogs_name="$lv_name"."-logs";
+    logger("\tlv_binlogs_name: $lv_binlogs_name\n",0);
+    $lv_tmp_name="$lv_name"."-tmp";
+    logger("\tlv_tmp_name: $lv_tmp_name\n",0);
+
+    # check that we have space available for the LV's
+    my $get_vgs=do_vgspace($lv_size, "instance");
+    my $get_vgs2=$get_vgs;
+    logger("\tReceived instance get_vgs:$get_vgs from do_vgspace\n\n", 1);
+    if ($get_vgs < 0){
+        logger("Exiting, not enough free space in $dbvg: $get_vgs\n", 0);
+        exit 2;
+    }
+    if ($db_type eq "mysql"){
+
+        # following the above, some mysql LV's are mounted on the os partition so we need to ensure there is enough space on that VG
+        $get_vgs=do_vgspace($binlogs_size, "logs");
+        $get_vgs2=$get_vgs;
+        logger("\tReceived logs get_vgs:$get_vgs from do_vgspace\n\n", 1);
+        if ($get_vgs < 0){
+            logger("Exiting, not enough free space for binlogs in sysvg: $get_vgs\n", 0);
+            exit 2;
+        }
+        $get_vgs=do_vgspace($tmp_size, "tmp");
+        $get_vgs2=$get_vgs;
+        logger("\tReceived tmp get_vgs:$get_vgs from do_vgspace\n\n", 1);
+        if ($get_vgs < 0){
+            logger("Exiting, not enough free space for tmp LV in sysvg: $get_vgs\n", 0);
+            exit 2;
+        }
+    }
+    # create lv for instance
+    logger("  Creating 'instance' LV $lv_instance_name\n",0);
+    logger("\tdo_lvcreate($lv_instance_name, $lv_instance_path, $lv_size, \"$dbvg\")\n",1);
+    do_lvcreate($lv_instance_name, $lv_instance_path, $lv_size, $dbvg);
+
+    # create lv for instance binlogs
+    logger("  Creating 'binlogs' LV $lv_binlogs_name\n",0) if ($db_type eq "mysql");
+    logger("\tdo_lvcreate($lv_binlogs_name, $lv_binlogs_path, $binlogs_size, \"$osvg\")\n",1) if ($db_type eq "mysql");
+    do_lvcreate($lv_binlogs_name, $lv_binlogs_path, $binlogs_size, $osvg) if ($db_type eq "mysql");
+
+    #create lv for instance tmp
+    logger("  Creating 'tmp' LV $lv_tmp_name\n",0) if ($db_type eq "mysql");
+    logger("\tdo_lvcreate($lv_tmp_name, $lv_tmp_path, $tmp_size, \"$dbvg\")\n",1) if ($db_type eq "mysql");
+    do_lvcreate($lv_tmp_name, $lv_tmp_path, $tmp_size, $dbvg) if ($db_type eq "mysql");
+
+    # mkfs on the LV's (calculate the mkfs settings)
+    logger("  Running mkfs on $lv_instance_path\n",0);
+    logger("\tdo_mkfs($instance_fs, $lv_instance_path, $dbvg_stripe, $dbvg_sunit, $dbvg_swidth)\n",1);
+    do_mkfs($instance_fs,$lv_instance_path, $dbvg_stripe, $dbvg_sunit, $dbvg_swidth);
+
+    #mkfs binlogs LV
+    logger("  Running mkfs on $lv_binlogs_path\n",0) if ($db_type eq "mysql");
+    logger("\tdo_mkfs($binlogs_fs, $lv_binlogs_path, $osvg_stripe, $osvg_sunit, $osvg_swidth)\n",1) if ($db_type eq "mysql");
+    do_mkfs($binlogs_fs,$lv_binlogs_path, $osvg_stripe, $osvg_sunit, $osvg_swidth) if ($db_type eq "mysql");
+
+    #mkfs tmp LV
+    logger("  Running mkfs on $lv_tmp_path\n",0) if ($db_type eq "mysql");
+    logger("\tdo_mkfs($tmp_fs, $lv_tmp_path, $dbvg_stripe, $dbvg_sunit, $dbvg_swidth)\n",1) if ($db_type eq "mysql");
+    do_mkfs($tmp_fs, $lv_tmp_path, $dbvg_stripe, $dbvg_sunit, $dbvg_swidth) if ($db_type eq "mysql");
+
+    # mkdir instance dir (check for the dir, don't fail if exist)
+    my $instance_dir;
+    if ($db_type eq "mysql"){
+        $instance_dir="/opt/mysql/instance/"."$lv_name";
+    }else{
+        $instance_dir="/opt/mongodb/instance/"."$lv_name";
+    }
+    logger("  Creating $db_type instance Dir: $instance_dir\n",0);
+    logger("\tdo_mkdir($instance_dir,$db_type)\n",1);
+    do_mkdir($instance_dir,$db_type);
+
+    # set all variables before attempting to mount the LV in do_mount
+    $options="defaults,nobarrier,inode64,attr2,noatime,nodiratime,allocsize=".$allocsize.",logbufs=8,sunit="."$dbvg_sunit".",swidth="."$dbvg_swidth";
+    logger("  Mounting $lv_instance_path to:\n",0);
+    logger("\tdir:      $instance_dir\n",0);
+    logger("\toptions:  $options\n",0);
+    logger("\ttype:     $instance_fs\n",0);
+    logger("\tdo_mount($lv_instance_path, $dir, $instance_fs, $db_type, $options)\n",1);
+    do_mount($lv_instance_path, $instance_dir, $instance_fs, $db_type, $options);
+
+    # mkdir binlogs dir (check for the dir, don't fail if exist)
+    if ($db_type eq "mysql"){
+
+        # since we're mysql, we'll have a few extra mounts to enable
+        $binlogs_dir="/opt/mysql/binlogs/"."$lv_name";
+        logger("  Creating mysql binlogs dir: $binlogs_dir\n",0);
+        logger("\tdo_mkdir($dir,$db_type)\n",1);
+        do_mkdir($binlogs_dir,$db_type);
+
+        # mount the binlogs LV
+        $options="defaults,nobarrier,inode64,attr2,noatime,nodiratime,allocsize=".$allocsize.",logbufs=8,sunit="."$osvg_sunit".",swidth="."$osvg_swidth";
+        logger("  Mounting $lv_binlogs_path to:\n",0);
+        logger("\tdir:      $binlogs_dir\n",0);
+        logger("\toptions:  $options\n",0);
+        logger("\ttype:     $binlogs_fs\n",0);
+        logger("\tdo_mount($lv_binlogs_path, $dir, $binlogs_fs, $db_type, $options)\n",1);
+        do_mount($lv_binlogs_path, $binlogs_dir, $binlogs_fs, $db_type, $options);
+
+        # repeat the above for the mysql tmp LV
+        $tmp_dir="/opt/mysql/tmp/"."$lv_name";
+        logger("  Creating mysql tmp dir: $tmp_dir\n",0);
+        logger("\tdo_mkdir($tmp_dir,$db_type)\n",1);
+        do_mkdir($tmp_dir,$db_type);
+        logger("\tRe-chowning /opt/mysql/tmp to mysql:dba\n",1);
+        do_chown($db_type,"/opt/mysql/tmp","");
+
+        # mount the tmp LV
+        $options="defaults,nobarrier,inode64,attr2,noatime,nodiratime,allocsize=".$allocsize.",logbufs=8,sunit="."$dbvg_sunit".",swidth="."$dbvg_swidth";
+        logger("  Mounting $lv_tmp_path to:\n",0);
+        logger("\tdir:      $tmp_dir\n",0);
+        logger("\toptions:  $options\n",0);
+        logger("\ttype:     $tmp_fs\n",0);
+        logger("\tdo_mount($lv_tmp_path, $tmp_dir, $tmp_fs, $db_type, $options)\n",1);
+        do_mount($lv_tmp_path, $tmp_dir, $tmp_fs, $db_type, $options);
+    }
+
+    # mkdirs
+    if ($db_type eq "mysql"){
+        # create all required mysql dirs
+        # create mysql instance dir in do_mkdir
+        $dir="/opt/mysql/instance/"."$lv_name"."/db";
+        logger("  Mkdir: $dir\n",0);
+        logger("\tdo_mkdir($dir,$db_type)\n",1);
+        do_mkdir($dir,$db_type);
+
+        # create mysql binlogs dir in do_mkdir
+        $dir="/opt/mysql/binlogs/"."$lv_name"."/relay";
+        logger("  Mkdir: $dir\n",0);
+        logger("\tdo_mkdir($dir,$db_type)\n",1);
+        do_mkdir($dir,$db_type);
+
+        # create mysql binlogs dir in do_mkdir
+        $dir =  "/opt/mysql/binlogs/"."$lv_name"."/binlog";
+        logger("  Mkdir: $dir\n",0);
+        logger("\tdo_mkdir($dir,$db_type)\n",1);
+        do_mkdir($dir,$db_type);
+
+        # LV symlink to /opt/mysql/binlogs/<instance>/binlog /opt/mysql/instance/<instance>/db/binlog
+        my $source="/opt/mysql/binlogs/"."$lv_name"."/binlog";
+        my $dest="/opt/mysql/instance/"."$lv_name"."/db/binlog";
+        logger("  Creating symlink (binlog): $source -> $dest\n",0) ;
+        logger("\tdo_symlink($source,$dest,$db_type)\n",1);
+        do_symlink($source,$dest,$db_type);
+
+        # LV symlink to /opt/mysql/binlogs/<instance>/relay /opt/mysql/instance/<instance>/db/relay
+        my $source="/opt/mysql/binlogs/"."$lv_name"."/relay";
+        my $dest="/opt/mysql/instance/"."$lv_name"."/db/relay";
+        logger("  Creating symlink (relay): $source -> $dest\n",0) ;
+        logger("\tdo_symlink($source,$dest,$db_type)\n",1);
+        do_symlink($source,$dest,$db_type);
+
+        # LV symlink to /opt/mysql/temp/<instance> /opt/mysql/instance/<instance>/tmp
+        my $source="/opt/mysql/tmp/"."$lv_name";
+        my $dest="/opt/mysql/instance/"."$lv_name"."/db/tmp";
+        logger("  Creating symlink (tmp): $source -> $dest\n",0) ;
+        logger("\tdo_symlink($source,$dest,$db_type)\n",1);
+        do_symlink($source,$dest,$db_type);
+    }else{
+        # mongodb dirs
+        # create mongodb admin dir /opt/mongodb/instance/<instance>/admin
+        $dir="/opt/mongodb/instance/"."$lv_name"."/admin";
+        logger("  Mkdir: $dir\n",0);
+        logger("\tdo_mkdir($dir,$db_type)\n",1);
+
+        # create mongodb admin conf dir /opt/mongodb/instance/<instance>/admin/conf
+        $dir="/opt/mongodb/instance/"."$lv_name"."/admin/conf";
+        logger("  Mkdir: $dir\n",0);
+        logger("\tdo_mkdir($dir,$db_type)\n",1);
+        do_mkdir($dir,$db_type);
+
+        # create mongodb admin log dir /opt/mongodb/instance/<instance>/admin/log
+        $dir="/opt/mongodb/instance/"."$lv_name"."/admin/log";
+        logger("  Mkdir: $dir\n",0);
+        logger("\tdo_mkdir($dir,$db_type)\n",1);
+        do_mkdir($dir,$db_type);
+
+        # create mongodb admin var dir /opt/mongodb/instance/<instance>/admin/var
+        $dir="/opt/mongodb/instance/"."$lv_name"."/admin/var";
+        logger("  Mkdir: $dir\n",0);
+        logger("\tdo_mkdir($dir,$db_type)\n",1);
+        do_mkdir($dir,$db_type);
+
+        # create mongodb db dir /opt/mongodb/instance/<instance>/db
+        $dir="/opt/mongodb/instance/"."$lv_name"."/db";
+        logger("  Mkdir: $dir\n",0);
+        logger("\tdo_mkdir($dir,$db_type)\n",1);
+
+        # create mongodb db dir /opt/mongodb/instance/<instance>/db/local
+        $dir="/opt/mongodb/instance/"."$lv_name"."/admin/dba_local";
+        logger("  Mkdir: $dir\n",0);
+        logger("\tdo_mkdir($dir,$db_type)\n",1);
+        do_mkdir($dir,$db_type);
+
+        # create mongodb db dir /opt/mongodb/instance/<instance>/db/data
+        $dir="/opt/mongodb/instance/"."$lv_name"."/db/data";
+        logger("  Mkdir: $dir\n",0);
+        logger("\tdo_mkdir($dir,$db_type)\n",1);
+        do_mkdir($dir,$db_type);
+    }
+
+    # add mounts to fstab
+    if ($db_type eq "mysql"){
+
+        # create mysql instance fstab entry
+        $options="defaults,nobarrier,inode64,attr2,noatime,nodiratime,allocsize=".$allocsize.",logbufs=8,sunit="."$dbvg_sunit".",swidth="."$dbvg_swidth";
+        $instance_dir="/opt/mysql/instance/"."$lv_name";
+        logger("  Adding Mysql Instance mount to fstab\n",0);
+        logger("\tdo_fstab($lv_instance_path, $instance_dir, $instance_fs, $options)\n",1);
+        do_fstab($lv_instance_path, $instance_dir, $instance_fs, $options);
+
+        # create mysql binlogs fstab entry
+        $options="defaults,nobarrier,inode64,attr2,noatime,nodiratime,allocsize=".$allocsize.",logbufs=8,sunit="."$osvg_sunit".",swidth="."$osvg_swidth";
+        $binlogs_dir="/opt/mysql/binlogs/"."$lv_name";
+        logger("  Adding Mysql binlogs mount to fstab\n",0);
+        logger("\tdo_fstab($lv_binlogs_path, $binlogs_dir, $binlogs_fs, $options)\n",1);
+        do_fstab($lv_binlogs_path, $binlogs_dir, $binlogs_fs, $options);
+
+        # create mysql tmp fstab entry
+        $options="defaults,nobarrier,inode64,attr2,noatime,nodiratime,allocsize=".$allocsize.",logbufs=8,sunit="."$dbvg_sunit".",swidth="."$dbvg_swidth";
+        $tmp_dir="/opt/mysql/tmp/"."$lv_name";
+        logger("  Adding Mysql tmp mount to fstab\n",0);
+        logger("\tdo_fstab($lv_tmp_path, $tmp_dir, $tmp_fs, $options)\n",1);
+        do_fstab($lv_tmp_path, $tmp_dir, $tmp_fs, $options);
+    }else{
+
+        # create mongodb instance fstab entry
+        $options="defaults,nobarrier,inode64,attr2,noatime,nodiratime,allocsize=".$allocsize.",logbufs=8,sunit="."$dbvg_sunit".",swidth="."$dbvg_swidth";
+        $instance_dir="/opt/mongodb/instance/"."$lv_name";
+        logger("  Adding Mongo Instance mount to fstab\n",0);
+        logger("\tdo_fstab($lv_instance_path, $instance_dir, $instance_fs, $options)\n",1);
+        do_fstab($lv_instance_path, $instance_dir, $instance_fs, $options);
+    }
+}
+
+sub do_lvcreate{
+
+    # function to create an LV. function is fully reusable
+    logger("Subroutine  do_lvcreate\n",0);
+    my $lv_instance_name    = $_[0];
+    my $lv_path                 = $_[1];
+    my $lv_size                 = $_[2];
+    my $vg_name                 = $_[3];
+    logger("  Options Received:\n",1);
+    logger("\tlv_instance_name:     $lv_instance_name\n",1);
+    logger("\tlv_path:                  $lv_path\n",1);
+    logger("\tlv_size:                  $lv_size\n",1);
+    logger("\tvg_name:                  $vg_name\n",1);
+
+    # verify that the LV doesn't already exist before we try to create it.
+    logger("  Checking for Existing LV $lv_name first\n",0);
+    logger("\tsudo $paths{'lvdisplay'} $lv_path  &>/dev/null\n",1);
+    system ("sudo $paths{'lvdisplay'} $lv_path  &>/dev/null");
+    my $returned=$?;
+    logger("\tlvdisplay $lv_instance_name returned: $returned\n",1);
+
+    # if we receive anything other than 0...the LV doesn't exist and we can safely continue
+    if ($returned == 0){
+        logger("Error: Found LV $lv_path \n",0);
+        logger("Exiting\n",0);
+        exit 2;
+    }
+    logger("  Creating LV $lv_instance_name with size $lv_size\n",0);
+    logger("Running: $paths{'lvcreate'} -L +"."$lv_size"." -n"." $lv_instance_name $vg_name\n", 1);
+    system("$paths{'lvcreate'} -L +"."$lv_size"." -n"." $lv_instance_name $vg_name");
+    my $returned_lvcreate=$?;
+    logger("\t$paths{'lvcreate'} $lv_instance_name returned: $returned_lvcreate\n",1);
+
+    # if we received anything other than 0...lvcreate failed and we'll exit
+    if ($returned_lvcreate != 0){
+        logger("Error Creating LV $lv_instance_name\n",0);
+        logger("Exiting\n",0);
+        exit 1;
+    }
+}
+sub do_mkfs{
+
+    # function to mkfs on  an LV. function is fully reusable
+    logger("Subroutine  do_mkfs\n",0);
+    my $mkfs_type               = $_[0];
+    my $lv_instance_name    = $_[1];
+    my $size                    = $_[2];
+    my $sunit                   = $_[3];
+    my $swidth                  = $_[4];
+    logger("  Options Received\n",1);
+    logger("\tmkfs_type:        $mkfs_type\n",1);
+    logger("\tlv_instance_name: $lv_instance_name\n",1);
+    logger("\tsize:             $size\n",1);
+    logger("\tsunit:            $sunit\n",1);
+    logger("\tswidth:           $swidth\n",1);
+
+    # since we're formatting using xfs...tune the filesystem based on the disk details we retrieved earlier
+    my $options="-i attr=2 -l version=2,size=$size"."m,sunit="."$sunit"." -d sunit="."$sunit".",swidth="."$swidth";
+    logger("\tOptions: $options\n",1);
+    logger("  Running: $fs_type{$mkfs_type} $options $lv_instance_name\n",1);
+    system ("$fs_type{$mkfs_type} $options $lv_instance_name");
+    my $returned=$?;
+    logger("\tmkfs $lv_instance_name returned: $returned\n",1);
+    # any return code other than zero is not acceptable here, so we exit
+    if ($returned != 0){
+        logger("Error making the filestem $lv_instance_name of type $mkfs_type\n",0);
+        logger("Exiting\n",0);
+        exit 1;
+    }
+}
+sub do_lvremove{
+
+    # function to completely remove an LV.
+    logger("Subroutine  do_lvremove\n",0);
+    my $lv_name = $_[0];
+    my $db_type = $_[1];
+    logger("  Options Received:\n",1);
+    logger("\tlv_name: $lv_name\n",1);
+    logger("\tdb_type: $db_type\n", 1);
+    my $instance_dir;
+    my $binlogs_dir;
+    my $tmp_dir;
+    my $lv_instance_name;
+    my $lv_binlogs_name;
+    my $tmp_name;
+    my $lv_instance_regex;
+    my $lv_binlogs_regex;
+    my $lv_tmp_regex;
+    if ($db_type eq "mysql"){
+
+        # since mysql has several LV's that are created, we'll have to remove several.
+        # since we already know the locations, we can hardcode the values
+        $instance_dir       = "/opt/mysql/instance/"."$lv_name";
+        $binlogs_dir        = "/opt/mysql/binlogs/"."$lv_name";
+        $tmp_dir            = "/opt/mysql/tmp/"."$lv_name";
+        $lv_instance_name   = "/dev/"."$dbvg"."/"."$lv_name"."-instance";
+        $lv_binlogs_name    = "/dev/sysvg/"."$lv_name"."-logs";
+        $lv_tmp_name        = "/dev/"."$dbvg"."/"."$lv_name"."-tmp";
+        $lv_instance_regex  = "opt.*mysql.*instances";
+        $lv_binlogs_regex   = "opt.*mysql.*binlogs";
+        $lv_tmp_regex       = "opt.*mysql.*tmp";
+    }else{
+
+        # hardcode the locations for removing mongodb lv
+        $instance_dir="/opt/mongodb/instance/"."$lv_name";
+        $lv_instance_name="/dev/"."$dbvg"."/"."$lv_name"."-instance";
+        $lv_instance_regex="opt.*mongo.*instance";
+    }
+
+    # unmount all of the instance dirs before removing the LV
+    logger("  Unmounting $instance_dir\n", 0);
+    logger("running: $paths{'umount'} -lf $instance_dir &>/dev/null\n",1);
+    system("$paths{'umount'} -lf $instance_dir &>/dev/null");
+    my $returned_umount_instance=$?;
+
+    # if we don't see a zero returned here, it's not necessarily a problem (mount may not even be mounted) so we can continue with removal
+    if ($returned_umount_instance != 0){
+        logger("Error unmounting $instance_dir\n",0);
+    }
+    logger("$paths{'df'} $instance_dir | $paths{'grep'} $lv_instance_regex\n",0);
+    system("$paths{'df'} $instance_dir | $paths{'grep'} $lv_instance_regex &>/dev/null");
+    my $returned_df=$?;
+    logger("returned: $returned_df\n", 1);
+
+    # if we don't see a zero returned here, it's not necessarily a problem (mount may not even be mounted) so we can continue with removal
+    if ($returned_df != 0){
+        logger("Error unmounting $instance_dir\n",0);
+    }
+    if ($db_type eq "mysql"){
+
+        # remove binlogs lv
+        logger("  Unmounting $binlogs_dir\n", 0);
+        system("$paths{'umount'} -lf $binlogs_dir &>/dev/null");
+        my $returned_umount_binlogs=$?;
+
+        # if we don't see a zero returned here, it's not necessarily a problem (mount may not even be mounted) so we can continue with removal
+        if ($returned_umount_binlogs != 0){
+            logger("Error unmounting $binlogs_dir\n",0);
+        }
+
+        #remove tmp lv
+        logger("  Unmounting $tmp_dir\n", 0);
+        system("$paths{'umount'} -lf $tmp_dir &>/dev/null");
+        my $returned_umount_tmp=$?;
+        if ($returned_umount_tmp != 0){
+            logger("Error unmounting $tmp_dir\n",0);
+        }
+    }
+    logger("\tlv_instance_name: $lv_instance_name\n",1);
+    logger("  Checking for existing LV $lv_instance_name first\n",0);
+    system ("sudo $paths{'lvdisplay'} $lv_instance_name  &>/dev/null");
+    my $returned_instance=$?;
+    logger("\t$paths{'lvdisplay'} $lv_instance_name returned: $returned_instance\n",1);
+
+    # if the LV isn't found, there's no need to lvremove it, so conditional is an "if" only
+    if ($returned_instance == 0){
+        logger("  Found LV for $lv_instance_name\n",0);
+        logger("  Deleting $lv_instance_name\n",0);
+        system ("sudo $paths{'lvremove'} -f $lv_instance_name");
+        my $returned_instance_lvremove=$?;
+        logger("\t$paths{'lvremove'} $lv_instance_name returned: $returned_instance_lvremove\n",1);
+
+        # if we see other than zero returned, there was some issue removing the LV (maybe LV is still active?)
+        if ($returned_instance_lvremove != 0){
+            logger("Error deleting LV $lv_instance_name\n",0);
+            logger("Exiting\n",0);
+            exit 1;
+        }else{
+            logger("  Deleted LV: $lv_instance_name\n",0);
+        }
+        logger("  Removing instance dir: $instance_dir\n",0);
+        logger("  Running: $paths{'rm'} -rf $instance_dir\n",1);
+
+        # delete the directory used by the mounted LV. First check for the Dir before trying to remove it
+        if (-d $instance_dir){
+            system("$paths{'rm'} -rf $instance_dir");
+            my $returned_rm=$?;
+            if ($returned_rm != 0){
+                logger("Error deleting $instance_dir\n", 0);
+                logger("Remove $instance_dir manually\n",0);
+                logger("Exiting\n",0);
+            }else{
+                logger("  Removed dir: $instance_dir\n",0);
+            }
+        }
+        # else, we don't do anything if the dir isn't there. we simply do not care
+    }
+    if ($db_type eq "mysql"){
+
+        # remove the extra mysql locations binlogs & tmp
+        logger("\tlv_binlogs_name: $lv_binlogs_name\n",1);
+        logger("  Checking for existing LV $lv_binlogs_name first\n",0);
+        system ("sudo $paths{'lvdisplay'} $lv_binlogs_name &>/dev/null");
+        my $returned_binlogs=$?;
+        logger("\t$paths{'lvdisplay'} $lv_binlogs_name returned: $returned_binlogs\n",1);
+        if ($returned_binlogs == 0){
+            logger("  Found LV for $lv_binlogs_name\n",0);
+            logger("  Deleting $lv_binlogs_name\n",0);
+            system ("sudo $paths{'lvremove'} -f $lv_binlogs_name");
+            my $returned_binlogs_lvremove=$?;
+            logger("\t$paths{'lvremove'} $lv_binlogs_name returned: $returned_binlogs_lvremove\n",1);
+
+            # this test is redundant, but better safe than sorry.
+            if ($returned_binlogs_lvremove != 0){
+                logger("Error deleting LV $lv_binlogs_name\n",0);
+                logger("Exiting\n",0);
+                exit 1;
+            }else{
+                logger("  Deleted LV: $lv_binlogs_name\n",0);
+            }
+            logger("  Removing binlogs dir: $binlogs_dir\n",0);
+            logger("  Running: $paths{'rm'} -rf $binlogs_dir\n",1);
+
+            # test for the existence for $binlogs_dir before removing it
+            if (-d $binlogs_dir){
+                system("$paths{'rm'} -rf $binlogs_dir");
+                my $returned_rm=$?;
+                if ($returned_rm != 0){
+                    logger("  Error deleting $binlogs_dir\n", 0);
+                    logger("  Remove $binlogs_dir manually\n",0);
+                }else{
+                    logger("  Removed binlogs dir: $binlogs_dir\n", 0);
+                }
+            }
+        }
+        logger("\tlv_tmp_name: $lv_tmp_name\n",1);
+        logger("  Checking for existing LV $lv_tmp_name first\n",0);
+        system ("sudo $paths{'lvdisplay'} $lv_tmp_name &>/dev/null");
+        my $returned_tmp=$?;
+        logger("\tlvdisplay $lv_tmp_name returned: $returned_tmp\n",1);
+        if ($returned_tmp == 0){
+            logger("  Found LV for $lv_tmp_name\n",0);
+            logger("  Deleting $lv_tmp_name\n",0);
+            system ("sudo $paths{'lvremove'} -f $lv_tmp_name");
+            my $returned_tmp_lvremove=$?;
+            logger("\t$paths{'lvremove'} $lv_tmp_name returned: $returned_tmp_lvremove\n",1);
+            if ($returned_tmp_lvremove != 0){
+                logger("Error deleting LV $lv_tmp_name\n",0);
+                logger("Exiting\n",0);
+                exit 1;
+            }else{
+                logger("  Deleted LV: $lv_tmp_name\n",0);
+            }
+            logger("  Removing mysql tmp dir: $binlogs_dir\n",0);
+            logger("  Running: $paths{'rm'} -rf $tmp_dir\n",1);
+
+            # test for the existence for $tmp_dir before removing it
+            if (-d $tmp_dir){
+                system("$paths{'rm'} -rf $tmp_dir");
+                my $returned_rm=$?;
+                if ($returned_rm != 0){
+                    logger("  Error deleting $tmp_dir\n", 0);
+                    logger("  Remove $tmp_dir manually\n",0);
+                }else{
+                    logger("  Removed mysql tmp dir: $binlogs_dir\n", 0);
+                }
+            }
+        }
+    }
+
+    # remove the mounts from fstab so system doesn't try to remount a missing LV
+    logger("  Removing mounts from /etc/fstab\n", 0);
+    $lv_instance_name=~s/\//\\\//g;
+    $lv_binlogs_name=~s/\//\\\//g;
+    $lv_tmp_name=~s/\//\\\//g;
+
+    # remove the line matching the <instance>-instance name using perl one liner since it's easier and faster
+    logger("  Running: $paths{'perl'} -ni -e 'print unless /$lv_instance_name/' /etc/fstab\n",1);
+    system("$paths{'perl'} -ni -e 'print unless /$lv_instance_name/' /etc/fstab");
+    my $returned_instance_removal=$?;
+    if ($returned_instance_removal != 0){
+        logger("  Removing instance mount from /etc/fstab failed with return code $returned_instance_removal\n",1);
+        logger("  Error removing instance mount from /etc/fstab\n",0);
+    }else{
+        logger("  Removed instance mount from /etc/fstab\n", 0);
+    }
+    if ($db_type eq "mysql"){
+
+        # remove the line matching the <instance>-binlogs name using perl one liner since it's easier and faster
+        logger("  Running: $paths{'perl'} -ni -e 'print unless /$lv_binlogs_name/' /etc/fstab\n", 1);
+        system("$paths{'perl'} -ni -e 'print unless /$lv_binlogs_name/' /etc/fstab");
+        my $returned_binlogs_removal=$?;
+        if ($returned_binlogs_removal != 0){
+            logger("  Removing binlogs mount from /etc/fstab failed with return code $returned_binlogs_removal\n",1);
+            logger("  Error removing binlogs mount from /etc/fstab\n",0);
+        }else{
+            logger("  Removed binlogs mount from /etc/fstab\n", 0);
+        }
+
+        # remove the line matching the <instance>-tmp name using perl one liner since it's easier and faster
+        logger("  Running: $paths{'perl'} -ni -e 'print unless /$lv_tmp_name/' /etc/fstab\n", 1);
+        system("$paths{'perl'} -ni -e 'print unless /$lv_tmp_name/' /etc/fstab");
+        my $returned_tmp_removal=$?;
+        if ($returned_tmp_removal != 0){
+            logger("  Removing mysql tmp mount from /etc/fstab failed with return code $returned_tmp_removal\n",1);
+            logger("  Error removing mysql tmp mount from /etc/fstab\n",0);
+        }else{
+            logger("  Removed mysql tmp mount from /etc/fstab\n", 0);
+        }
+    }
+}
+sub do_lvresize{
+    # fucntion to resize an LV
+    logger("Subroutine do_lvresize\n",0);
+    my $lv_name     = $_[0];
+    my $lv_size     = $_[1];
+    my $lv_type     = $_[2];
+    my $db_type     = $_[3];
+    logger("  Options Received:\n", 1);
+    logger("\tlv_size:      $lv_size\n", 1);
+    logger("\tlv_name:      $lv_name\n", 1);
+    logger("\tlv_type:      $lv_type\n", 1);
+    logger("\tdb_type:      $db_type\n", 1);
+    my $lv_instance_name;
+    my $short_instance_dir;
+    my $short_binlogs_dir;
+    my $short_tmp_dir;
+    if ($db_type eq "mysql"){
+
+        # hardcode values for a mysql instance
+        $volume_name            = "/dev/"."$vg{$lv_type}"."/"."$lv_name"."-"."$lv_type";
+        $short_instance_dir     = "/opt/mysql/instance/";
+        $short_binlogs_dir      = "/opt/mysql/binlogs/";
+        $short_tmp_dir          = "/opt/mysql/tmp/";
+    }else{
+
+        # hardcode values for a mongodb instance
+        $volume_name            = "/dev/"."$vg{$lv_type}"."/"."$lv_name"."-"."$lv_type";
+        $short_instance_dir     = "/opt/mongodb/instance/";
+    }
+    my $instance_dir    = "$short_instance_dir"."$lv_name";
+    my $binlogs_dir     = "$short_binlogs_dir"."$lv_name";
+    my $tmp_dir         = "$short_tmp_dir"."$lv_name";
+    my $lv_dir          = "";
+    if ($lv_type eq "instance"){
+        $lv_dir = $instance_dir;
+    }
+    if ($lv_type eq "logs"){
+        $lv_dir = $binlogs_dir;
+    }
+    if ($lv_type eq "tmp"){
+        $lv_dir = $tmp_dir;
+    }
+    logger(" Using $lv_dir based on lv_type of: $lv_type\n", 1);
+    logger("  Ensuring $lv_dir is mounted before resizing\n", 0);
+
+    # we'll make sure the filessytem is mounted now, for no particular reason.
+    system("$paths{'mount'} $lv_dir &> /dev/null");
+    my $returned_mount=$?;
+    logger("\t$paths{'mount'} $lv_dir returned: $returned_mount\n", 1);
+    if ($returned_mount == 0){
+        logger("  Mounted $lv_dir\n",0);
+    }elsif ($returned_mount != 256){
+        logger("\t$lv_dir Already Mounted\n",0);
+    }else{
+        logger("Error Mounting $lv_dir\n", 0);
+        logger("Exiting\n",0);
+        exit 1;
+    }
+    logger("  Running: $paths{'df'} $lv_dir &>/dev/null\n", 1);
+    system("$paths{'df'} $lv_dir &>/dev/null");
+    my $returned_df=$?;
+    logger("\t$paths{'df'} return code: $returned_df\n",1);
+    if ($returned_df != 0){
+        logger("  Running: /bin/mount $lv_dir\n", 1);
+        system("$paths{'mount'} $lv_dir");
+        my $returned_mount = $?;
+        if ($returned_mount != 0){
+            logger("Error: Cannot Mount $lv_dir\n", 0);
+            logger("mount return code: $returned_mount\n", 1);
+            logger("Exiting\n",0);
+            exit 2;
+        }
+    }
+    # check that there is enough space on the VG before adding the space
+    my $get_vgs=do_vgspace($lv_size, $lv_type);
+    my $get_vgs2=$get_vgs;
+    logger("\tReceived get_vgs:$get_vgs from do_vgspace\n\n", 1);
+    if ($get_vgs=~/[0-9]/){
+        logger("\t$vg{$lv_type} disk free after resize: $get_vgs2\n",0);
+        logger("\t$vg{$lv_type} disk requested: $lv_size\n",1);
+        my $space_free=$get_vgs;
+        if ($space_free >= 0){
+            logger("  OK to resize $volume_name: $space_free\n",0);
+            system ("sudo $paths{'lvdisplay'} $volume_name &>/dev/null");
+            my $returned=$?;
+            logger("\t$paths{'lvdisplay'} $volume_name returned: $returned\n",1);
+            if ($returned == 0){
+                logger("  Found LV for $volume_name\n",1);
+                logger("  Extending LV $volume_name\n",1);
+                logger("  Running: $paths{'lvextend'} -L +$lv_size $volume_name\n", 1);
+                system("$paths{'lvextend'} -L +$lv_size $volume_name");
+                my $returned_lvextend=$?;
+                logger("\t$paths{'lvextend'} of $volume_name returned: $returned_lvextend\n",1);
+                if ($returned_lvextend != 0){
+                    logger("Error running lvextend on $volume_name\n",0);
+                    logger("Exiting\n",0);
+                    exit 2;
+                }
+                logger("  Running: /usr/sbin/xfs_growfs $volume_name\n",1);
+                system("$paths{'xfs_growfs'} $volume_name");
+                my $returned_resize=$?;
+                logger("\t$paths{'xfs_growfs'} $volume_name returned: $returned_resize\n",1);
+                if($returned_resize != 0){
+                    logger("Error running xfs_growfs on $volume_name\n",0);
+                    logger("Exiting\n",0);
+                    exit 2;
+                }
+            }else{
+                logger("Can't find LV for $lv_instance_name\n", 0);
+                exit 1;
+            }
+        }else{
+            logger("Error: NOT ENOUGH SPACE in $vg{$lv_type} to resize: $space_free\n",0);
+            logger("Exiting\n",0);
+            exit 1;
+        }
+    }
+}
+sub do_mount{
+    logger("Subroutine do_mount\n",0);
+    my $lv          = $_[0];
+    my $dir         = $_[1];
+    my $type        = $_[2];
+    my $db_type     = $_[3];
+    my $options     = $_[4];
+    logger("  Options Received:\n",1);
+    logger("\tlv:       $lv\n",1);
+    logger("\tdir:      $dir\n",1);
+    logger("\ttype:     $type\n",1);
+    logger("\toptions:  $options\n",1);
+    logger("\t/$paths{'mount'} -t $type $lv $dir -o $options\n",1);
+    system("$paths{'mount'} -t $type $lv $dir -o $options");
+    my $returned=$?;
+    logger("  Mount $lv to $dir returned: $returned\n",1);
+
+    # if mount doesn't return zero,  we need to exit else everyhing after this will fail
+    if ($returned != 0){
+        logger("Error mounting $lv to $dir\n",0);
+        logger("Exiting\n",0);
+        exit 1;
+    }else{
+        logger("  Chowning dir:$dir\n", 0);
+        do_chown($db_type,$dir,"dir");
+    }
+}
+sub do_mkdir{
+    # function to create the directories needed, uses -p flag
+    logger("Subroutine  do_mkdir\n",0);
+    my $dir     = $_[0];
+    my $db_type     = $_[1];
+    logger("  Options Received:\n",1);
+    logger("\tdir: $dir\n",1);
+    if (-d $dir){
+        logger("  Dir $dir already exists.. Continuing\n",0);
+        my $saved_dir="$dir".".saved";
+        logger("  Moving $dir to $saved_dir\n",0);
+        logger("\t/$paths{'mv'} $dir $saved_dir\n",1);
+        system("$paths{'mv'} $dir $saved_dir");
+        my $returned_move=$?;
+
+        # if mkdir fails to return zero, we need to exit else everyhing after this will fail
+        if ($returned_move != 0){
+            logger("Error moving $dir to $saved_dir\n", 0);
+            logger("Directories will need to be manually removed to continue\n", 0);
+            logger("Exiting\n",0);
+            exit 2;
+        }
+    }else{
+        system("$paths{'mkdir'} -p $dir");
+        my $returned=$?;
+        logger("\t$paths{'mkdir'} -p $dir returned: $returned\n",1);
+        if ($returned != 0){
+            logger("Error creating Directory $dir\n",0);
+            logger("Exiting\n",0);
+            exit 1;
+        }else{
+            logger("  Chowning dir:$dir\n", 0);
+            do_chown($db_type,$dir,"dir");
+        }
+    }
+}
+sub do_chown{
+    # function to chown the directories as whatever user the application needs
+    logger("Subroutine do_chown\n", 0);
+    my $db_type     = $_[0];
+    my $dir         = $_[1];
+    my $type        = $_[2];
+    if ($type eq "dir"){
+        $recursive = "-R";
+    }else{
+        $recursive="";
+    }
+    logger("  Options Received:\n",0);
+    logger("\tdb_type: $db_type\n",1);
+    logger("\tdir: $dir\n",1);
+    my $owner;
+    logger("  Setting ownership for $dir\n", 0);
+    if ($db_type eq "mysql"){
+        $owner = "mysql:dba";
+    }else{
+        $owner = "mongodb:dba";
+    }
+    # this is a recursive chown
+    system("$paths{'chown'} $recursive $owner $dir");
+    my $returned_chown=$?;
+    logger("\t$paths{'chown'} -R $owner $dir returned: $returned_chown\n",1);
+
+    #if the chwon doesn't work, we should exit so it can be done manually. this is the last step, so we can safely assume all other steps were OK
+    if ($returned_chown != 0){
+        logger("Error setting ownership on $dir\n",0);
+        logger("Manually execute: sudo $paths{'chown'} -R $owner $dir\n",0);
+        logger("Exiting\n",0);
+        exit 2;
+    }else{
+        logger("  chowned $dir to $owner\n",0);
+    }
+}
+sub do_symlink{
+    # create the symlinks, this is reusable for generic scripts
+    logger("Subroutine  do_symlink\n",0);
+    my $source      = $_[0];
+    my $dest        = $_[1];
+    my $db_type     = $_[2];
+    logger("  Options Received:\n",1);
+    logger("\t$source: $source\n",1);
+    logger("\tdest:    $dest\n",1);
+    if (-l $dest){
+        logger("Symlink $source -> $dest already exists\n",0);
+    }else{
+        system("$paths{'ln'} -s $source $dest");
+        my $returned=$?;
+        logger("\t$paths{'ln'} -s $source $dest returned: $returned\n",1);
+        if ($returned != 0){
+            logger("Error creating the symlink $source -> $dest\n",0);
+            logger("Manually execute: $paths{'ln'} -s $source $dest\n",0);
+            logger("Exiting\n",0);
+            exit 1;
+        }
+        do_chown($db_type,$dest,"link");
+    }
+}
+
+sub do_fstab{
+    # function to create the fstab entry; this is portable
+    logger("Subroutine  do_fstab\n",0);
+    my $lv_path     = $_[0];
+    my $dir         = $_[1];
+    my $type        = $_[2];
+    my $options     = $_[3];
+    logger("  Options Received:\n",1);
+    logger("\tlv_path:  $lv_path\n",1);
+    logger("\tdir:      $dir\n",1);
+    logger("\ttype:     $type\n",1);
+    logger("\toptions:  $options\n",1);
+    logger("  Adding lv $lv_path mountpoint to /etc/fstab\n",1);
+    open (FILE, ">>/etc/fstab");
+    print FILE "$lv_path"."\t"."$dir"."\t"."$type"."\t"."$options"."\t0\t0\n";
+    close FILE;
+    logger("  Added to /etc/fstab: $lv_path"."\t"."$dir"."\t"."$type"."\t"."$options"."\t0\t0\n",0);
+}
+sub do_vgspace{
+    # function to retrieve the space available based on the vg hash which defines which VG to look at
+    logger("Subroutine do_vgspace\n", 0);
+    my $size        = $_[0];
+    my $lv_type     = $_[1];
+    logger("  Options Received:\n", 1);
+    logger("\tsize: $size\n", 1);
+    logger("\tlv_type: $lv_type\n", 1);
+    logger("\tvg: $vg{$lv_type}\n", 1);
+    logger("\tRunning: $paths{'vgdisplay'} --units g $vg{$lv_type} | grep \"Free  PE\" | cut -d \"/\" -f 3\n", 1);
+
+    # fork to get the size of the VG in question
+    my $get_vgs=`$paths{'vgdisplay'} --units g $vg{$lv_type} | grep "Free  PE" | cut -d "/" -f 3`;
+    chomp $get_vgs;
+    if($get_vgs=~/GB/){
+        logger("\t$vg{$lv_type} is in GB\n", 0);
+        $get_vgs=~s/GB//g;
+    }elsif ($get_vgs=~/GiB/){
+        logger("\t$vg{$lv_type} is in GB\n", 0);
+        $get_vgs=~s/GiB//g;
+    }else{
+        logger("\t$vg{$lv_type} is not recognized: $get_vgs\n",0);
+        exit 2;
+    }
+    $get_vgs=~s/\ //g;
+    my $free=$get_vgs;
+    logger("\tReturning: $get_vgs\n\n", 1);
+    $get_vgs=$get_vgs-$size;
+    if ($get_vgs < 0){
+        logger("Uh-oh...this will fail:\n", 0);
+        logger("Requested: $size\n", 0);
+        logger("Free: $free\n",0);
+        logger("Diff: $get_vgs\n",0);
+    }
+    if ($lv_type eq "tmp"){
+        my $new_lv_size=$lv_size;
+        $new_lv_size=~s/G//g;
+        $get_vgs=$get_vgs-$new_lv_size;
+    }
+    # return the value of var get_vgs (the size of the VG)
+    return($get_vgs);
+}
+sub logger{
+    # this is just a generic logger rather than printing "print crap if $debug" etc.
+    # 0 = normal output
+    # 1 = debug output
+    # all data is logged as debug to the logfile
+    my $data = $_[0];
+    my $type = $_[1];
+    if ($type == 0){
+        print "$data";
+    }else{
+        print "$data" if ($debug);
+    }
+    print LOG "$data";
+}
+
