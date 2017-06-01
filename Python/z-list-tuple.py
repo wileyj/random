@@ -16,5 +16,5 @@ class Solution(object):
         return "no match found"
 
 list = [2, 7, 11, 15]
-target = 9
+target = 17
 print Solution().twoSum(list,target)

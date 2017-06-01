@@ -16,6 +16,7 @@ this = sorted(
     list,
     key=lambda
     student: student.grade
+    # reverse=True
 
 )
 print this

@@ -1,10 +1,9 @@
 from __future__ import division
+start = 1
+end = 115
 
-x = 10
-# print isinstance(x, (int, long))
 
-
-for i in range(1,115):
+for i in range(start,end):
     val3 = i/3
     val4 = i/4
     if val3.is_integer() and not val4.is_integer():

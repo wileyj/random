@@ -8,6 +8,7 @@ x = {
 }
 sorted_x = sorted(
     x.items(),
-    key=operator.itemgetter(0),
+    key=operator.itemgetter(1),
+    # reverse=True
 )
 print sorted_x

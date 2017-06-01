@@ -1,8 +1,10 @@
 import operator
+# needs some sample date from apache: access_log/error_log
+
 a_ips = {}
 e_ips = {}
 count = 0
-for line in open("/Users/wileyj/Downloads/access_log/access_log", 'r'):
+for line in open("./access_log", 'r'):
     ip = line.split(' ')[0]
     count = 1
     try:
@@ -20,7 +22,7 @@ this = sorted(
 for i in xrange(0,10):
     print this[i]
 
-for line in open("/Users/wileyj/Downloads/error_log/error_log", 'r'):
+for line in open("./error_log", 'r'):
     try:
         test = line.split(' ')[7]
         if test == '[client':

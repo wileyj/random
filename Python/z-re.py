@@ -3,13 +3,13 @@ import re
 class Solution(object):
     def test_email(self, email):
         try:
-            x=re.search('(\w+[.|\w])*@(\w+[.])*\w+',email)
+            x=re.search('(\w+[.|\w])*@(\w+[.])*\w+[.][a-z].*',email)
             return x.group()
         except:
             pass
 list = [
     "santa.banta@gmail.co.in",
-    "adsf@.yahoo",
+    "adsf@yahoo",
     "bogusemail123@sillymail.com",
     "santa.banta.manta@gmail.co.in",
     "santa.banta.manta@gmail.co.in.xv.fg.gh",
@@ -20,7 +20,7 @@ list = [
 this = sorted(
     list,
     key=itemgetter(0,1),
-    # reverse=True
+    reverse=True
 )
 for item in this:
     # print item
