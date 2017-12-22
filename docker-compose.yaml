@@ -1,0 +1,228 @@
+version: "3"
+services:
+    consul_master:
+        image: local/ops:consul.latest
+        container_name: consul_master
+        hostname: consul_master
+        environment:
+            - CONSUL_JOIN=false
+            - CONSUL_NODE=consul_master1
+            - CONSUL_MASTER=localhost
+            - CONSUL_DATADIR=/opt/consul
+            - CONSUL_DC=us-east-1
+            - CONSUL_UI=true
+            - CONSUL_LOGLEVEL=INFO
+            - CONSUL_SERVER=true
+            - CONSUL_BOOTSTRAP=true
+            - VAULT_DISABLE_CACHE=false
+            - VAULT_DISABLE_MLOCK=true
+            - VAULT_CONSUL_ADDR=localhost
+            - VAULT_CONSUL_PORT=8500
+            - VAULT_CONSUL_PATH=vault
+            - VAULT_LISTENER_ADDR=localhost
+            - VAULT_LISTENER_PORT=8200
+            - VAULT_LISTENER_TLS_DISABLE=1
+            - STATSITE_ADDR=localhost
+            - STATSITE_PORT=8125
+            - VAULT_DISABLE_STATSITE_HOSTNAME=true
+        ports:
+            - "8400:8400"
+            - "8500:8500"
+            - "53:8600/udp"
+            - "8300:8300"
+            - "8301:8301"
+            - "8301:8301/udp"
+            - "8302:8302"
+            - "8302:8302/udp"
+            - "8200:8200"
+            - "8215:8215"
+            - "8125:8125/udp"
+        expose:
+            - "8400"
+            - "8500"
+            - "8600/udp"
+            - "8300"
+            - "8301"
+            - "8301/udp"
+            - "8302"
+            - "8302/udp"
+            - "8200"
+            - "8125"
+            - "8125/udp"
+        command: /sbin/runit_bootstrap
+
+    consul_agent1:
+        image: local/ops:consul.latest
+        container_name: consul_agent1
+        hostname: consul_agent1
+        environment:
+            - CONSUL_JOIN=true
+            - CONSUL_NODE=consul_agent1
+            - CONSUL_MASTER=consul_master
+            - CONSUL_DATADIR=/opt/consul
+            - CONSUL_DC=us-east-1
+            - CONSUL_UI=true
+            - CONSUL_LOGLEVEL=INFO
+            - CONSUL_SERVER=true
+            - CONSUL_BOOTSTRAP=false
+            - VAULT_DISABLE_CACHE=false
+            - VAULT_DISABLE_MLOCK=true
+            - VAULT_CONSUL_ADDR=localhost
+            - VAULT_CONSUL_PORT=8500
+            - VAULT_CONSUL_PATH=vault
+            - VAULT_LISTENER_ADDR=localhost
+            - VAULT_LISTENER_PORT=8200
+            - VAULT_LISTENER_TLS_DISABLE=1
+            - STATSITE_ADDR=localhost
+            - STATSITE_PORT=8125
+            - VAULT_DISABLE_STATSITE_HOSTNAME=true
+        expose:
+            - "8400"
+            - "8500"
+            - "8600/udp"
+            - "8300"
+            - "8301"
+            - "8301/udp"
+            - "8302"
+            - "8302/udp"
+            - "8200"
+            - "8125"
+            - "8125/udp"
+        command: /sbin/runit_bootstrap
+        depends_on:
+            - consul_master
+        links:
+            - consul_master:consul_master
+
+    consul_agent2:
+        image: local/ops:consul.latest
+        container_name: consul_agent2
+        hostname: consul_agent2
+        environment:
+            - CONSUL_JOIN=true
+            - CONSUL_NODE=consul_agent2
+            - CONSUL_MASTER=consul_master
+            - CONSUL_DATADIR=/opt/consul
+            - CONSUL_DC=us-east-1
+            - CONSUL_UI=true
+            - CONSUL_LOGLEVEL=INFO
+            - CONSUL_SERVER=true
+            - CONSUL_BOOTSTRAP=false
+            - VAULT_DISABLE_CACHE=false
+            - VAULT_DISABLE_MLOCK=true
+            - VAULT_CONSUL_ADDR=localhost
+            - VAULT_CONSUL_PORT=8500
+            - VAULT_CONSUL_PATH=vault
+            - VAULT_LISTENER_ADDR=localhost
+            - VAULT_LISTENER_PORT=8200
+            - VAULT_LISTENER_TLS_DISABLE=1
+            - STATSITE_ADDR=localhost
+            - STATSITE_PORT=8125
+            - VAULT_DISABLE_STATSITE_HOSTNAME=true
+        expose:
+            - "8400"
+            - "8500"
+            - "8600/udp"
+            - "8300"
+            - "8301"
+            - "8301/udp"
+            - "8302"
+            - "8302/udp"
+            - "8200"
+            - "8125"
+            - "8125/udp"
+        command: /sbin/runit_bootstrap
+        depends_on:
+            - consul_master
+        links:
+            - consul_master:consul_master
+
+
+    consul_agent3:
+        image: local/ops:consul.latest
+        container_name: consul_agent3
+        hostname: consul_agent3
+        environment:
+            - CONSUL_JOIN=true
+            - CONSUL_NODE=consul_agent3
+            - CONSUL_MASTER=consul_master
+            - CONSUL_DATADIR=/opt/consul
+            - CONSUL_DC=us-east-1
+            - CONSUL_UI=true
+            - CONSUL_LOGLEVEL=INFO
+            - CONSUL_SERVER=true
+            - CONSUL_BOOTSTRAP=false
+            - VAULT_DISABLE_CACHE=false
+            - VAULT_DISABLE_MLOCK=true
+            - VAULT_CONSUL_ADDR=localhost
+            - VAULT_CONSUL_PORT=8500
+            - VAULT_CONSUL_PATH=vault
+            - VAULT_LISTENER_ADDR=localhost
+            - VAULT_LISTENER_PORT=8200
+            - VAULT_LISTENER_TLS_DISABLE=1
+            - STATSITE_ADDR=localhost
+            - STATSITE_PORT=8125
+            - VAULT_DISABLE_STATSITE_HOSTNAME=true
+        expose:
+            - "8400"
+            - "8500"
+            - "8600/udp"
+            - "8300"
+            - "8301"
+            - "8301/udp"
+            - "8302"
+            - "8302/udp"
+            - "8200"
+            - "8125"
+            - "8125/udp"
+        command: /sbin/runit_bootstrap
+        depends_on:
+            - consul_master
+        links:
+            - consul_master:consul_master
+
+
+    registrator:
+        hostname: registrator
+        container_name: registrator
+        volumes:
+            - /var/run/docker.sock:/tmp/docker.sock
+        network_mode: "host"
+        image: gliderlabs/registrator
+        command: -internal=true consul://localhost:8500
+        depends_on:
+            - consul_master
+
+    nginx_host1:
+        environment:
+            - SERVICE_80_NAME=http
+            - SERVICE_80_ID=nginx1
+            - SERVICE_80_CHECK_HTTP=true
+            - SERVICE_80_CHECK_HTTP=/
+            - SERVICE_80_CHECK_TTL=30s
+        expose:
+            - "80"
+        container_name: nginx_host1
+        hostname: nginx_host1
+        image: nginx
+        depends_on:
+            - consul_master
+            - consul_agent1
+            - registrator
+
+    nginx_host2:
+        environment:
+            - SERVICE_80_NAME=http
+            - SERVICE_80_ID=nginx2
+            - SERVICE_80_CHECK_HTTP=true
+            - SERVICE_80_CHECK_HTTP=/
+            - SERVICE_80_CHECK_TTL=30s
+        expose:
+            - "80"
+        container_name: nginx_host2
+        hostname: nginx_host2
+        image: nginx
+        depends_on:
+            - consul_master
+            - consul_agent1
+            - registrator

@@ -1,0 +1,1 @@
+git rebase -i `git rev-list --max-parents=0 HEAD` -x "git commit --amend --author 'New Name <wileyj@users.noreply.github.com>' -CHEAD"

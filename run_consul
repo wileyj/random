@@ -1,0 +1,45 @@
+docker run -d \
+-p 8400:8400  \
+-p 8500:8500 \
+-p 53:8600/udp \
+-p 8300:8300  \
+-p 8301:8301 \
+-p 8301:8301/udp \
+-p 8302:8302 \
+-p 8302:8302/udp \
+-p 8200:8200 \
+-p 8215:8125 \
+-p 8125:8125/udp \
+-e CONSUL_JOIN=false \
+-e CONSUL_NODE=consul_master1 \
+-e CONSUL_MASTER=localhost \
+-e CONSUL_DATADIR=/opt/consul \
+-e CONSUL_DC=us-east-1 \
+-e CONSUL_UI=true \
+-e CONSUL_LOGLEVEL=INFO \
+-e CONSUL_SERVER=true \
+-e CONSUL_BOOTSTRAP=true \
+-e VAULT_DISABLE_CACHE=false \
+-e VAULT_DISABLE_MLOCK=true \
+-e VAULT_CONSUL_ADDR=localhost \
+-e VAULT_CONSUL_PORT=8500 \
+-e VAULT_CONSUL_PATH=vault \
+-e VAULT_LISTENER_ADDR=localhost \
+-e VAULT_LISTENER_PORT=8200 \
+-e VAULT_LISTENER_TLS_DISABLE=1 \
+-e STATSITE_ADDR=localhost \
+-e STATSITE_PORT=8125 \
+-e VAULT_DISABLE_STATSITE_HOSTNAME=true \
+-h consul \
+--name consul_master \
+local/ops:consul.latest \
+/sbin/runit_bootstrap
+
+docker run -d \
+    -v /var/run/docker.sock:/tmp/docker.sock \
+    --net=host \
+    -h registrator \
+    --name registrator \
+    gliderlabs/registrator \
+    -internal \
+    consul://localhost:8500
